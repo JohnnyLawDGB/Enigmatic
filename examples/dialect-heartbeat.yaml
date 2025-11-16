@@ -1,0 +1,58 @@
+name: heartbeat
+version: 0.1.0
+planes:
+  value:
+    - header: 21.21
+      label: FRAME_SYNC
+    - header: 7.00
+      label: HEARTBEAT
+    - header: 11.11
+      label: CONSENSUS_PROOF
+  fee:
+    - band: 0.21
+      jitter: 0.005
+    - band: 2.10
+      jitter: 0.015
+  cardinality:
+    - m: 21
+      n: 21
+      sigma: +1
+    - m: 13
+      n: 13
+      sigma: +1
+  block:
+    delta: 3
+    tolerance: 1
+symbols:
+  - name: FRAME_SYNC
+    match:
+      value: 21.21
+      fee: 0.21
+      m: 21
+      n: 21
+      delta: 3
+      sigma: +1
+  - name: HEARTBEAT
+    match:
+      value: 7.00
+      fee: 0.21
+      m: 21
+      n: 21
+      delta: 3
+      sigma: +1
+  - name: CONSENSUS_PROOF
+    match:
+      value: 11.11
+      fee: 2.10
+      m: 13
+      n: 13
+      delta: 1
+      sigma: +1
+automation:
+  rpc:
+    endpoint: http://127.0.0.1:14022
+    wallet: enigmatic
+    min_confirmations: 1
+  scheduling:
+    max_drift_blocks: 1
+    rebroadcast_misses: 2

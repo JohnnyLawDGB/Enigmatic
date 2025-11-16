@@ -52,3 +52,7 @@ This holds when:
 - block height entropy exceeds 2^{48}  
 
 DigiByte satisfies these conditions under typical network behavior.
+
+Operational mitigations for timing and fingerprinting attacks live in
+`specs/06-security-model.md`, which complements this section’s mathematical
+assumptions with noise-injection guidance.
