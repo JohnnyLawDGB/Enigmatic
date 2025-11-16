@@ -37,3 +37,46 @@ The final stream communicates:
 
 This entire flow demonstrates telemetry decoding without referencing ASCII
 payloads—only the state vector defined in `specs/03-formal-model.md`.
+
+---
+
+# INTEL Dialect — Decoding the 06:24:14 Chord
+
+The watcher captured block `15558722` at `06:24:14 UTC`, where a single UTXO
+fan-out carved the characteristic `217 / 152 / 352` anchors plus a dust shard.
+Use `examples/dialect-intel.yaml` for decoding.
+
+## 1. Observe the Raw Transactions
+
+| Tx | Amount (DGB) | Fee (DGB) | Inputs | Outputs | Notes |
+| -- | ------------ | --------- | ------ | ------- | ----- |
+| A  | 217.00000000 | 0.21000000 | 2 | 3 | Channel/link anchor |
+| B  | 152.00000000 | 0.21000000 | 2 | 3 | Sync acknowledgement |
+| C  | 352.00000000 | 0.21000000 | 2 | 3 | Presence / telemetry |
+| D  | 0.00400000   | 0.21000000 | 1 | 4 | Breadcrumb dust |
+
+All four transactions spend from the same parent, share the `0.21` fee, and
+land within the three-block cadence defined by the dialect.
+
+## 2. Project into INTEL State Vectors
+
+```
+(217, 0.21, m=2, n=3, Δh=0, micros=—)   → CHANNEL_LINK
+(152, 0.21, m=2, n=3, Δh=0, micros=—)   → SYNC_ACK
+(352, 0.21, m=2, n=3, Δh=0, micros=0.152) → PRESENCE
+(0.004, 0.21, m=1, n=4, Δh=0, micros=0.004) → BREADCRUMB
+```
+
+The decoder associates the `0.152` and `0.004` micro outputs with the
+`INTEL_HELLO` symbol, verifying both the anchor ordering and the shared fee
+metronome.
+
+## 3. Interpret the Message
+
+- `INTEL_CHANNEL_LINK` → announcing the lane being used.
+- `INTEL_HELLO` → the presence symbol anchored by the 0.152 micro.
+- `INTEL_HIGH_PRESENCE` is **not** asserted in this chord; therefore the frame
+  remains informational rather than urgent.
+
+Documenting examples like this builds a corpus of reference transcripts for
+future tooling and human auditors.
