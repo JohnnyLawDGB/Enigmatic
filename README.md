@@ -3,6 +3,10 @@
 **Enigmatic** is a Layer-0 communication protocol that uses DigiByte’s native
 UTXO, fee, and transaction topology space as a *steganographic message channel*.
 
+> TL;DR for contributors: think **state planes**, not ciphertext blobs. Install
+> the package via `pip install -e .` to get the `enigmatic-dgb` CLI, or use
+> `scripts/enigmatic_rpc.py` when you want explicit control over UTXO plumbing.
+
 Instead of adding new opcodes or data layers, Enigmatic treats:
 
 - Values (e.g. `21.21`, `7.00`, `0.978521`, `0.0100xxxx`)
@@ -32,8 +36,26 @@ Each plane evolves independently yet composes into a **state vector** (amount, f
 - **Classical cipher mindset:** Focuses on transforming ASCII payloads via substitution or encryption before transport. Enigmatic intentionally avoids this framing; the message emerges from how state variables co-vary across planes.
 - **Implication for contributors:** When designing new dialects, think in terms of *state synchronization* and *multi-agent negotiation* (see `specs/04-encoding-process.md` and `specs/05-decoding-process.md`) rather than letter-level encoding tricks.
 
-This repository contains the **protocol specification**, **whitepaper**, and
-**reference examples** for Enigmatic on DigiByte.
+This repository contains the **protocol specification**, **whitepaper**,
+**Python reference stack**, and **dial tone examples** for Enigmatic on DigiByte.
+
+## Quickstart
+
+```bash
+git clone https://github.com/<org>/Enigmatic.git
+cd Enigmatic
+python -m venv .venv && source .venv/bin/activate
+pip install -e .[dev]
+
+# Run unit tests
+pytest
+
+# Send a message via the CLI (requires DGB RPC creds in env)
+enigmatic-dgb send-message --to-address dgb1example --intent identity
+```
+
+Need more guidance? Peek at [`CONTRIBUTING.md`](CONTRIBUTING.md) for environment
+setup tips, repository conventions, and review expectations.
 
 ---
 
@@ -57,32 +79,17 @@ This repository contains the **protocol specification**, **whitepaper**, and
 
 ## Repository Layout
 
-```text
-docs/
-  whitepaper.md        # human-readable whitepaper version (Markdown)
+| Path | Contents |
+| ---- | -------- |
+| [`enigmatic_dgb/`](enigmatic_dgb) | Python package (encoder, decoder, watcher, CLI, RPC/transaction utilities). |
+| [`scripts/`](scripts) | Stand-alone helpers; currently the RPC heartbeat planner. |
+| [`examples/`](examples) | Dialects, walkthroughs, and diagrams ([index](examples/README.md)). |
+| [`docs/`](docs) | Whitepaper drafts, architecture notes, and doc guide ([index](docs/README.md)). |
+| [`specs/`](specs) | Canonical protocol chapters (overview → dialects). |
+| [`tests/`](tests) | Pytest coverage for encoder/decoder logic. |
 
-specs/
-  01-protocol-overview.md
-  02-encoding-primitives.md
-  03-formal-model.md
-  04-encoding-process.md
-  05-decoding-process.md
-  06-security-model.md
-  07-implementation-notes.md
-  08-dialects.md
-
-examples/
-  example-transaction-pattern.md
-  example-decoding-flow.md
-  dialect-heartbeat.yaml
-
-scripts/
-  enigmatic_rpc.py     # RPC helper for emitting heartbeat transactions
-```
-
-You can also place a PDF version of the whitepaper in `docs/`:
-
-- `docs/Enigmatic_L0_Protocol.pdf`
+Rendered whitepaper PDFs live next to the Markdown originals inside `docs/`
+when reviewers need to diff layout.
 
 ---
 
@@ -120,6 +127,27 @@ Key features:
 Ensure your node has the target wallet loaded and unlocked prior to
 invocation. The script purposefully emits human-readable planning data so
 that implementers can iterate towards richer automation workflows.
+
+## Documentation & Spec Map
+
+- [`docs/README.md`](docs/README.md) — Human-readable guide to the whitepaper,
+  architecture notes, and PDF snapshots.
+- [`specs/`](specs) — Eight focused chapters that define the protocol from
+  overview through dialects. Start at `01-protocol-overview.md` and work down.
+- [`examples/README.md`](examples/README.md) — Dialects plus decoded walkthroughs
+  you can replay with the RPC helper.
+
+Surface area intentionally stays small: the README or CONTRIBUTING should be the
+only entry points you need before diving into specs or code.
+
+## Contributing
+
+- Follow the [quickstart](#quickstart) to set up tooling, then read
+  [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow expectations.
+- Document any new dialects/examples inside [`examples/README.md`](examples/README.md)
+  so replay instructions stay close to the assets.
+- Run `pytest` before opening a PR and highlight spec edits in your summary so
+  reviewers can focus on semantics.
 
 ---
 

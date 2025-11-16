@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enigmatic-dgb"
+version = "0.1.0"
+description = "Reference tooling for the Enigmatic DigiByte signaling protocol"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+  {name = "Enigmatic contributors"}
+]
+dependencies = [
+  "requests>=2.31",
+  "PyYAML>=6.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "mypy>=1.8",
+  "black>=24.0"
+]
+
+[project.scripts]
+enigmatic-dgb = "enigmatic_dgb.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
