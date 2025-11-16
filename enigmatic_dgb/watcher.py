@@ -1,11 +1,11 @@
-"""Watcher service polling a DigiByte node and decoding Enigmatic packets."""
+"""Watcher service polling DigiByte nodes and decoding Enigmatic traffic."""
 
 from __future__ import annotations
 
 import logging
 import time
 from datetime import datetime
-from typing import Callable, List, Set
+from typing import Callable, Dict, Iterable, List, Sequence, Set
 
 from .decoder import EnigmaticDecoder, ObservedTx, group_into_packets
 from .model import EncodingConfig, EnigmaticMessage
@@ -15,73 +15,108 @@ logger = logging.getLogger(__name__)
 
 
 class Watcher:
-    """Poll for address activity and decode packets as they arrive."""
+    """Observe on-chain activity and decode Enigmatic messages as they appear."""
 
     def __init__(
         self,
         rpc: DigiByteRPC,
-        address: str,
+        addresses: Sequence[str],
         config: EncodingConfig,
         poll_interval_seconds: int = 30,
     ) -> None:
+        if not addresses:
+            raise ValueError("Watcher requires at least one address to observe")
+
         self.rpc = rpc
-        self.address = address
+        self.addresses: List[str] = list(addresses)
         self.config = config
         self.poll_interval_seconds = poll_interval_seconds
         self.decoder = EnigmaticDecoder(config)
-        self._seen_txids: Set[str] = set()
+        self._seen_txids: Dict[str, Set[str]] = {addr: set() for addr in self.addresses}
 
     def poll_once(self) -> List[EnigmaticMessage]:
-        """Poll the node for transactions touching the watched address."""
+        """Poll the node for transactions touching the watched addresses."""
 
-        txs = self._fetch_address_transactions()
-        new_txs = [tx for tx in txs if tx.txid not in self._seen_txids]
-        for tx in new_txs:
-            self._seen_txids.add(tx.txid)
-        if not new_txs:
-            return []
+        messages: List[EnigmaticMessage] = []
+        for address in self.addresses:
+            try:
+                observed = self._fetch_address_transactions(address)
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to fetch transactions for address %s", address)
+                continue
 
-        packets = group_into_packets(new_txs, self.config)
-        messages = [self.decoder.decode_packet(packet, self.address) for packet in packets]
+            new_txs = self._filter_new_transactions(address, observed)
+            if not new_txs:
+                continue
+
+            packets = group_into_packets(new_txs, self.config)
+            for packet in packets:
+                try:
+                    message = self.decoder.decode_packet(packet, address)
+                except Exception:  # pragma: no cover - decoding errors should not stop loop
+                    logger.exception("Failed to decode packet for %s", address)
+                    continue
+                messages.append(message)
         return messages
 
     def run_forever(self, callback: Callable[[EnigmaticMessage], None]) -> None:
         """Continuously poll and emit decoded messages via callback."""
 
-        logger.info("Starting watcher for %s", self.address)
+        logger.info("Starting watcher for %d addresses", len(self.addresses))
         while True:
             try:
                 for message in self.poll_once():
                     callback(message)
-            except Exception as exc:  # pragma: no cover - best effort logging
-                logger.exception("Watcher error: %s", exc)
+            except Exception:  # pragma: no cover - best effort logging
+                logger.exception("Watcher loop encountered an error")
             time.sleep(self.poll_interval_seconds)
 
-    def _fetch_address_transactions(self) -> List[ObservedTx]:
-        """Fetch recent transactions for the address.
+    def _filter_new_transactions(
+        self, address: str, observed: Iterable[ObservedTx]
+    ) -> List[ObservedTx]:
+        """Return only transactions we have not processed yet for ``address``."""
 
-        DigiByte Core does not provide an out-of-the-box address index. This method
-        uses ``listtransactions`` as a reasonable default, but integrators can
-        replace it with a custom indexer by subclassing ``Watcher``.
+        seen = self._seen_txids.setdefault(address, set())
+        new_txs: List[ObservedTx] = []
+        for tx in observed:
+            if tx.txid in seen:
+                continue
+            seen.add(tx.txid)
+            new_txs.append(tx)
+        return new_txs
+
+    def _fetch_address_transactions(self, address: str) -> List[ObservedTx]:
+        """Fetch recent transactions for ``address``.
+
+        DigiByte Core does not provide an out-of-the-box address index.  Integrators
+        may want to provide a custom address indexer or cache in production.  This
+        implementation uses ``listtransactions`` and filters results as a
+        placeholder.
         """
 
-        raw = self.rpc.call("listtransactions", ["*", 1000, 0, True])
+        params = ["*", 1000, 0, True]
+        raw = self.rpc.call("listtransactions", params)
         observed: List[ObservedTx] = []
         for entry in raw:
-            if entry.get("address") != self.address:
+            if entry.get("address") != address:
                 continue
             txid = entry.get("txid")
             if not txid:
                 continue
-            amount = float(entry.get("amount", 0.0))
-            timestamp = datetime.utcfromtimestamp(entry.get("time", int(time.time())))
-            fee = float(entry.get("fee", 0.0)) if "fee" in entry else None
+            timestamp = entry.get("time")
+            if timestamp is None:
+                # TODO: use block timestamp from gettransaction if available.
+                timestamp = int(time.time())
             observed.append(
                 ObservedTx(
-                    txid=txid,
-                    timestamp=timestamp,
-                    amount=abs(amount),
-                    fee=abs(fee) if fee is not None else None,
+                    txid=str(txid),
+                    timestamp=datetime.utcfromtimestamp(int(timestamp)),
+                    amount=abs(float(entry.get("amount", 0.0))),
+                    fee=(
+                        abs(float(entry.get("fee")))
+                        if entry.get("fee") is not None
+                        else None
+                    ),
                 )
             )
         return observed
