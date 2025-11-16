@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+"""Command-line interface for Enigmatic's experimental tooling.
+
+The CLI exposes a thin, well-documented façade over the encoder, dialect, and
+optional session helpers so that legitimate operators can experiment with
+presence and identity signaling without writing custom Python.
+"""
+
 import argparse
+import base64
+import binascii
 import json
 import logging
 import sys
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
 from .dialect import DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction
 from .model import EncodingConfig, EnigmaticMessage
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
-from .symbol_sender import send_symbol
+from .session import SessionContext
+from .symbol_sender import SessionRequiredError, send_symbol
 from .tx_builder import TransactionBuilder
 from .watcher import Watcher
 
@@ -91,11 +101,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional shared secret used to encrypt the symbol payload",
     )
+    symbol_parser.add_argument(
+        "--session-key-b64",
+        default=None,
+        help="Base64 session key negotiated via handshake",
+    )
+    symbol_parser.add_argument("--session-id", default=None, help="Session identifier")
+    symbol_parser.add_argument(
+        "--session-channel",
+        default=None,
+        help="Channel name tied to the provided session",
+    )
+    symbol_parser.add_argument(
+        "--session-dialect",
+        default=None,
+        help="Dialect name tied to the provided session",
+    )
 
     return parser
 
 
-def _parse_payload_json(payload_json: str) -> Dict[str, Any]:
+def _parse_payload_json(payload_json: str) -> dict[str, Any]:
     try:
         data = json.loads(payload_json) if payload_json else {}
     except json.JSONDecodeError as exc:  # pragma: no cover - input validation
@@ -107,11 +133,11 @@ def _parse_payload_json(payload_json: str) -> Dict[str, Any]:
 
 def _chunk_instructions(
     instructions: Sequence[SpendInstruction], max_per_tx: int
-) -> List[List[SpendInstruction]]:
+) -> list[list[SpendInstruction]]:
     if max_per_tx <= 0 or len(instructions) <= max_per_tx:
         return [list(instructions)] if instructions else []
-    chunks: List[List[SpendInstruction]] = []
-    current: List[SpendInstruction] = []
+    chunks: list[list[SpendInstruction]] = []
+    current: list[SpendInstruction] = []
     for instruction in instructions:
         current.append(instruction)
         if len(current) >= max_per_tx:
@@ -122,8 +148,8 @@ def _chunk_instructions(
     return chunks
 
 
-def _aggregate_outputs(instructions: Iterable[SpendInstruction]) -> Dict[str, float]:
-    outputs: Dict[str, float] = defaultdict(float)
+def _aggregate_outputs(instructions: Iterable[SpendInstruction]) -> dict[str, float]:
+    outputs: dict[str, float] = defaultdict(float)
     for instruction in instructions:
         outputs[instruction.to_address] += instruction.amount
     return dict(outputs)
@@ -150,7 +176,7 @@ def cmd_send_message(args: argparse.Namespace) -> None:
         raise CLIError("Encoder returned no spend instructions")
 
     builder = TransactionBuilder(rpc)
-    txids: List[str] = []
+    txids: list[str] = []
     for chunk in _chunk_instructions(instructions, MAX_OUTPUTS_PER_TX):
         outputs = _aggregate_outputs(chunk)
         txid = builder.send_payment_tx(outputs, fee)
@@ -188,15 +214,37 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
     extra_payload = _parse_payload_json(args.extra_payload_json)
     dialect = load_dialect(args.dialect_path)
     rpc = DigiByteRPC.from_env()
-    txids = send_symbol(
-        rpc,
-        dialect=dialect,
-        symbol_name=args.symbol,
-        to_address=args.to_address,
-        channel=args.channel,
-        extra_payload=extra_payload,
-        encrypt_with_passphrase=args.encrypt_with_passphrase,
-    )
+    session: SessionContext | None = None
+    if args.session_key_b64:
+        if not args.session_id:
+            raise CLIError("--session-id is required when --session-key-b64 is provided")
+        try:
+            session_key = base64.urlsafe_b64decode(args.session_key_b64.encode("ascii"))
+        except (binascii.Error, ValueError) as exc:
+            raise CLIError("Session key must be valid base64") from exc
+        session_channel = args.session_channel or args.channel
+        session_dialect = args.session_dialect or dialect.name
+        session = SessionContext(
+            session_id=args.session_id,
+            channel=session_channel,
+            dialect=session_dialect,
+            created_at=datetime.utcnow(),
+            session_key=session_key,
+        )
+
+    try:
+        txids = send_symbol(
+            rpc,
+            dialect=dialect,
+            symbol_name=args.symbol,
+            to_address=args.to_address,
+            channel=args.channel,
+            extra_payload=extra_payload,
+            encrypt_with_passphrase=args.encrypt_with_passphrase,
+            session=session,
+        )
+    except SessionRequiredError as exc:
+        raise CLIError(str(exc)) from exc
     print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 

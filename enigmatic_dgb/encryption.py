@@ -1,8 +1,10 @@
 """Optional encryption helper utilities for Enigmatic payloads.
 
-The helpers defined here provide a modern AEAD + KDF construction that callers
-can use to protect legitimate semantic metadata associated with Enigmatic
-messages.  They are not intended for misuse or hiding illicit traffic.
+The helpers defined here provide a modern AEAD (AES-GCM by default, but the
+patterns also support ChaCha20-Poly1305) + KDF construction that callers can use
+to protect legitimate semantic metadata associated with Enigmatic messages.
+They are not intended for misuse or hiding illicit traffic, and they reinforce
+the guidance that Enigmatic's numeric telemetry is just a transport layer.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -51,7 +53,7 @@ def _derive_key(passphrase: str, salt: bytes) -> bytes:
     return kdf.derive(passphrase.encode("utf-8"))
 
 
-def derive_key_from_passphrase(passphrase: str, salt: bytes | None = None) -> Tuple[bytes, bytes]:
+def derive_key_from_passphrase(passphrase: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
     """Derive a symmetric key using scrypt."""
 
     if salt is None:
@@ -62,7 +64,7 @@ def derive_key_from_passphrase(passphrase: str, salt: bytes | None = None) -> Tu
 
 
 def encrypt_payload(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     passphrase: str,
     associated_data: bytes | None = None,
 ) -> EncryptedPayload:
@@ -86,7 +88,7 @@ def encrypt_payload(
     )
 
 
-def decrypt_payload(encrypted: EncryptedPayload, passphrase: str) -> Dict[str, Any]:
+def decrypt_payload(encrypted: EncryptedPayload, passphrase: str) -> dict[str, Any]:
     """Decrypt an :class:`EncryptedPayload` structure using the provided passphrase."""
 
     salt = base64.b64decode(encrypted.salt.encode("ascii"))
