@@ -11,9 +11,11 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Sequence
 from uuid import uuid4
 
+from .dialect import DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction
 from .model import EncodingConfig, EnigmaticMessage
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
+from .symbol_sender import send_symbol
 from .tx_builder import TransactionBuilder
 from .watcher import Watcher
 
@@ -61,6 +63,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="Polling cadence in seconds (default: 30)",
+    )
+
+    symbol_parser = subparsers.add_parser(
+        "send-symbol", help="send a symbolic dialect pattern"
+    )
+    symbol_parser.add_argument(
+        "--dialect-path",
+        required=True,
+        help="Path to the dialect YAML file",
+    )
+    symbol_parser.add_argument("--symbol", required=True, help="Symbol name")
+    symbol_parser.add_argument("--to-address", required=True, help="Destination address")
+    symbol_parser.add_argument("--channel", default="default", help="Channel name")
+    symbol_parser.add_argument(
+        "--extra-payload-json",
+        default="{}",
+        help="Optional JSON payload merged into the symbol metadata",
     )
 
     return parser
@@ -152,6 +171,21 @@ def cmd_watch(args: argparse.Namespace) -> None:
     watcher.run_forever(emit)
 
 
+def cmd_send_symbol(args: argparse.Namespace) -> None:
+    extra_payload = _parse_payload_json(args.extra_payload_json)
+    dialect = load_dialect(args.dialect_path)
+    rpc = DigiByteRPC.from_env()
+    txids = send_symbol(
+        rpc,
+        dialect=dialect,
+        symbol_name=args.symbol,
+        to_address=args.to_address,
+        channel=args.channel,
+        extra_payload=extra_payload,
+    )
+    print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -160,11 +194,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_send_message(args)
         elif args.command == "watch":
             cmd_watch(args)
+        elif args.command == "send-symbol":
+            cmd_send_symbol(args)
         else:  # pragma: no cover - argparse enforces choices
             raise CLIError(f"Unknown command: {args.command}")
     except KeyboardInterrupt:  # pragma: no cover - interactive use
         logger.info("Interrupted by user")
-    except (CLIError, ConfigurationError, RPCError, RuntimeError) as exc:
+    except (CLIError, ConfigurationError, RPCError, RuntimeError, DialectError) as exc:
         parser.exit(1, f"error: {exc}\n")
 
 

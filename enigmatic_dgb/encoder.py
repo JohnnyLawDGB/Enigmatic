@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple
+from datetime import datetime
+from typing import Any, List, Tuple
 from uuid import uuid4
 
+from .dialect import DialectSymbol
 from .model import EncodingConfig, EnigmaticMessage
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,65 @@ class EnigmaticEncoder:
             "Encoded message %s into %d instructions", message.id or str(uuid4()), len(instructions)
         )
         return instructions, self.config.fee_punctuation
+
+    def encode_symbol(
+        self,
+        symbol: DialectSymbol,
+        channel: str,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> tuple[EnigmaticMessage, List[SpendInstruction], float]:
+        """Encode a :class:`DialectSymbol` into spend instructions.
+
+        This helper lets trusted systems load dialect definitions from YAML and
+        request Enigmatic patterns using symbolic names (e.g. ``INTEL_HELLO``).
+        It keeps REAL/other integrations isolated from the blockchain concerns
+        while ensuring the on-chain usage remains legitimate experimentation.
+        """
+
+        payload: dict[str, Any] = {
+            "symbol": symbol.name,
+            "dialect": symbol.dialect_name or "unknown",
+        }
+        payload.update(symbol.metadata)
+        if extra_payload:
+            payload.update(extra_payload)
+
+        message = EnigmaticMessage(
+            id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            channel=channel,
+            intent=symbol.intent or "symbol",
+            payload=payload,
+        )
+
+        instructions: List[SpendInstruction] = []
+        for amount in symbol.anchors:
+            instructions.append(
+                SpendInstruction(
+                    to_address=self.target_address,
+                    amount=amount,
+                    is_anchor=True,
+                    is_micro=False,
+                    role=message.intent,
+                )
+            )
+        for idx, amount in enumerate(symbol.micros):
+            instructions.append(
+                SpendInstruction(
+                    to_address=self.target_address,
+                    amount=amount,
+                    is_anchor=False,
+                    is_micro=True,
+                    role=f"symbol_micro_{idx}",
+                )
+            )
+        logger.debug(
+            "Encoded symbol %s (%s) into %d instructions",
+            symbol.name,
+            symbol.dialect_name,
+            len(instructions),
+        )
+        return message, instructions, self.config.fee_punctuation
 
     def _anchors_for_intent(self, intent: str) -> List[float]:
         anchors = self.config.anchor_amounts
