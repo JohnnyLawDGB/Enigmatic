@@ -9,7 +9,12 @@ from typing import Any, List, Tuple
 from uuid import uuid4
 
 from .dialect import DialectSymbol
-from .model import EncodingConfig, EnigmaticMessage
+from .encryption import encrypt_payload
+from .model import (
+    EncodingConfig,
+    EnigmaticMessage,
+    message_with_encrypted_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +37,34 @@ class EnigmaticEncoder:
         self.config = config
         self.target_address = target_address
 
-    def encode_message(self, message: EnigmaticMessage) -> Tuple[List[SpendInstruction], float]:
+    def encode_message(
+        self,
+        message: EnigmaticMessage,
+        *,
+        encrypt_with_passphrase: str | None = None,
+    ) -> Tuple[List[SpendInstruction], float]:
         """Convert a high-level message into spend instructions.
 
         The encoder does not interact with the blockchain. It simply derives
         a deterministic pattern which may later be realized by wallet code.
         This project exists for legitimate experimental signaling over DigiByte.
+        When ``encrypt_with_passphrase`` is provided the semantic payload is
+        encrypted using the optional helper layer before being stored with the
+        message, but the numeric spend pattern remains unchanged.
         """
 
+        payload_for_encoding = dict(message.payload)
+        if encrypt_with_passphrase:
+            encrypted_payload = encrypt_payload(
+                payload_for_encoding,
+                passphrase=encrypt_with_passphrase,
+            )
+            updated = message_with_encrypted_payload(message, encrypted_payload)
+            message.payload = updated.payload
+            message.encrypted = updated.encrypted
+
         anchors = self._anchors_for_intent(message.intent)
-        micros = self._micros_for_payload(message.payload)
+        micros = self._micros_for_payload(payload_for_encoding)
 
         instructions: List[SpendInstruction] = []
         for amount in anchors:
@@ -75,6 +98,7 @@ class EnigmaticEncoder:
         symbol: DialectSymbol,
         channel: str,
         extra_payload: dict[str, Any] | None = None,
+        encrypt_with_passphrase: str | None = None,
     ) -> tuple[EnigmaticMessage, List[SpendInstruction], float]:
         """Encode a :class:`DialectSymbol` into spend instructions.
 
@@ -82,6 +106,8 @@ class EnigmaticEncoder:
         request Enigmatic patterns using symbolic names (e.g. ``INTEL_HELLO``).
         It keeps REAL/other integrations isolated from the blockchain concerns
         while ensuring the on-chain usage remains legitimate experimentation.
+        Callers may optionally encrypt the semantic payload using the
+        ``encrypt_with_passphrase`` parameter to protect contextual metadata.
         """
 
         payload: dict[str, Any] = {
@@ -99,6 +125,13 @@ class EnigmaticEncoder:
             intent=symbol.intent or "symbol",
             payload=payload,
         )
+
+        if encrypt_with_passphrase:
+            encrypted_payload = encrypt_payload(
+                payload,
+                passphrase=encrypt_with_passphrase,
+            )
+            message = message_with_encrypted_payload(message, encrypted_payload)
 
         instructions: List[SpendInstruction] = []
         for amount in symbol.anchors:

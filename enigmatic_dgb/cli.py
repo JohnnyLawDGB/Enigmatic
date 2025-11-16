@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="{}",
         help="JSON object describing optional payload flags",
     )
+    send_parser.add_argument(
+        "--encrypt-with-passphrase",
+        default=None,
+        help="Optional shared secret used to encrypt the message payload",
+    )
 
     watch_parser = subparsers.add_parser(
         "watch", help="watch an address for Enigmatic packets"
@@ -80,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--extra-payload-json",
         default="{}",
         help="Optional JSON payload merged into the symbol metadata",
+    )
+    symbol_parser.add_argument(
+        "--encrypt-with-passphrase",
+        default=None,
+        help="Optional shared secret used to encrypt the symbol payload",
     )
 
     return parser
@@ -132,7 +142,9 @@ def cmd_send_message(args: argparse.Namespace) -> None:
     rpc = DigiByteRPC.from_env()
     config = EncodingConfig.enigmatic_default()
     encoder = EnigmaticEncoder(config, target_address=args.to_address)
-    instructions, fee = encoder.encode_message(message)
+    instructions, fee = encoder.encode_message(
+        message, encrypt_with_passphrase=args.encrypt_with_passphrase
+    )
 
     if not instructions:
         raise CLIError("Encoder returned no spend instructions")
@@ -165,6 +177,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
             "channel": message.channel,
             "intent": message.intent,
             "payload": message.payload,
+            "encrypted": message.encrypted,
         }
         print(json.dumps(data, separators=COMPACT_JSON_SEPARATORS))
 
@@ -182,6 +195,7 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
         to_address=args.to_address,
         channel=args.channel,
         extra_payload=extra_payload,
+        encrypt_with_passphrase=args.encrypt_with_passphrase,
     )
     print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
