@@ -75,11 +75,51 @@ examples/
   example-transaction-pattern.md
   example-decoding-flow.md
   dialect-heartbeat.yaml
+
+scripts/
+  enigmatic_rpc.py     # RPC helper for emitting heartbeat transactions
 ```
 
 You can also place a PDF version of the whitepaper in `docs/`:
 
 - `docs/Enigmatic_L0_Protocol.pdf`
+
+---
+
+## RPC Heartbeat Helper
+
+The repository ships with a lightweight orchestration script that speaks
+to a running DigiByte node via JSON-RPC and arranges transactions to match
+the state vectors defined in a dialect file (for example
+[`examples/dialect-heartbeat.yaml`](examples/dialect-heartbeat.yaml)).
+
+```bash
+export DGB_RPC_USER="rpcuser"
+export DGB_RPC_PASSWORD="rpcpass"
+
+# Dry run: prints the proposed inputs/outputs without broadcasting.
+python3 scripts/enigmatic_rpc.py \
+  --dialect examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT
+
+# Broadcast the transaction once the plan looks correct.
+python3 scripts/enigmatic_rpc.py --symbol HEARTBEAT --broadcast
+```
+
+Key features:
+
+- Loads the automation metadata (endpoint, wallet name, scheduling hints)
+  from the dialect file but allows overrides via CLI flags.
+- Selects UTXOs that satisfy the cardinality and value constraints defined
+  for the symbol.
+- Splits change outputs to preserve the desired output cardinality while
+  respecting DigiByte's dust limits.
+- Supports dry-run planning so that operators can audit the state vector
+  before a transaction is signed and relayed.
+
+Ensure your node has the target wallet loaded and unlocked prior to
+invocation. The script purposefully emits human-readable planning data so
+that implementers can iterate towards richer automation workflows.
 
 ---
 
