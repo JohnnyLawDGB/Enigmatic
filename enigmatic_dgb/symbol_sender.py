@@ -22,6 +22,7 @@ def send_symbol(
     to_address: str,
     channel: str = "default",
     extra_payload: dict[str, Any] | None = None,
+    encrypt_with_passphrase: str | None = None,
 ) -> List[str]:
     """Encode and broadcast a dialect symbol.
 
@@ -39,7 +40,10 @@ def send_symbol(
     config.fee_punctuation = dialect.fee_punctuation
     encoder = EnigmaticEncoder(config, target_address=to_address)
     message, instructions, fee = encoder.encode_symbol(
-        symbol, channel=channel, extra_payload=extra_payload
+        symbol,
+        channel=channel,
+        extra_payload=extra_payload,
+        encrypt_with_passphrase=encrypt_with_passphrase,
     )
 
     if not instructions:
@@ -61,6 +65,7 @@ def load_and_send_symbol(
     to_address: str,
     channel: str = "default",
     extra_payload: dict[str, Any] | None = None,
+    encrypt_with_passphrase: str | None = None,
 ) -> List[str]:
     """Convenience wrapper that loads a dialect from disk then sends the symbol."""
 
@@ -72,6 +77,7 @@ def load_and_send_symbol(
         to_address=to_address,
         channel=channel,
         extra_payload=extra_payload,
+        encrypt_with_passphrase=encrypt_with_passphrase,
     )
 
 
