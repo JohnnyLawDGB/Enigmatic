@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, List, Tuple
+from typing import Any
 from uuid import uuid4
 
 from .dialect import DialectSymbol
@@ -42,7 +42,7 @@ class EnigmaticEncoder:
         message: EnigmaticMessage,
         *,
         encrypt_with_passphrase: str | None = None,
-    ) -> Tuple[List[SpendInstruction], float]:
+    ) -> tuple[list[SpendInstruction], float]:
         """Convert a high-level message into spend instructions.
 
         The encoder does not interact with the blockchain. It simply derives
@@ -66,7 +66,7 @@ class EnigmaticEncoder:
         anchors = self._anchors_for_intent(message.intent)
         micros = self._micros_for_payload(payload_for_encoding)
 
-        instructions: List[SpendInstruction] = []
+        instructions: list[SpendInstruction] = []
         for amount in anchors:
             instructions.append(
                 SpendInstruction(
@@ -99,7 +99,7 @@ class EnigmaticEncoder:
         channel: str,
         extra_payload: dict[str, Any] | None = None,
         encrypt_with_passphrase: str | None = None,
-    ) -> tuple[EnigmaticMessage, List[SpendInstruction], float]:
+    ) -> tuple[EnigmaticMessage, list[SpendInstruction], float]:
         """Encode a :class:`DialectSymbol` into spend instructions.
 
         This helper lets trusted systems load dialect definitions from YAML and
@@ -133,7 +133,7 @@ class EnigmaticEncoder:
             )
             message = message_with_encrypted_payload(message, encrypted_payload)
 
-        instructions: List[SpendInstruction] = []
+        instructions: list[SpendInstruction] = []
         for amount in symbol.anchors:
             instructions.append(
                 SpendInstruction(
@@ -162,7 +162,7 @@ class EnigmaticEncoder:
         )
         return message, instructions, self.config.fee_punctuation
 
-    def _anchors_for_intent(self, intent: str) -> List[float]:
+    def _anchors_for_intent(self, intent: str) -> list[float]:
         anchors = self.config.anchor_amounts
         if intent == "identity":
             return [anchors[0]]
@@ -174,8 +174,8 @@ class EnigmaticEncoder:
             return [anchors[4]]
         return [anchors[0]]
 
-    def _micros_for_payload(self, payload: dict) -> List[float]:
-        micros: List[float] = []
+    def _micros_for_payload(self, payload: dict) -> list[float]:
+        micros: list[float] = []
         if not payload:
             return micros
         keys = sorted(payload.keys())

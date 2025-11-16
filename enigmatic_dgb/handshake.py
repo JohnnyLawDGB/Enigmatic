@@ -3,7 +3,10 @@
 This module layers a standard X25519 + HKDF key agreement workflow on top of
 Enigmatic's messaging model.  It deliberately avoids custom cryptographic math
 and instead focuses on building payloads that higher layers can transport using
-the existing :class:`enigmatic_dgb.model.EnigmaticMessage` infrastructure.
+the existing :class:`enigmatic_dgb.model.EnigmaticMessage` infrastructure.  The
+cryptographic strength in session-aware dialects comes from this handshake layer
+plus AEAD payload encryption; the numeric DigiByte patterns remain a transport
+channel rather than a replacement for proven cryptography.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum, auto
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import x25519
@@ -28,6 +31,7 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from .model import EnigmaticMessage
+from .session import SessionContext
 
 logger = logging.getLogger(__name__)
 
@@ -154,10 +158,10 @@ def derive_session_key(shared_secret: bytes, params: HandshakeParameters) -> byt
     return hkdf.derive(shared_secret)
 
 
-def build_handshake_payload(state: HandshakeState, include_mac: bool = False) -> Dict[str, Any]:
+def build_handshake_payload(state: HandshakeState, include_mac: bool = False) -> dict[str, Any]:
     """Build a serializable payload describing the handshake state."""
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "type": "handshake",
         "version": HANDSHAKE_PAYLOAD_VERSION,
         "session_id": state.params.session_id,
@@ -173,7 +177,7 @@ def build_handshake_payload(state: HandshakeState, include_mac: bool = False) ->
     return payload
 
 
-def parse_handshake_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_handshake_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize a handshake payload dictionary."""
 
     required_fields = {"type", "version", "session_id", "phase", "dialect", "channel", "public_key"}
@@ -224,7 +228,7 @@ def _compute_shared_secret(state: HandshakeState, remote_public_key: bytes) -> b
     return private_key.exchange(public_key)
 
 
-def initiator_build_init_message(state: HandshakeState) -> Dict[str, Any]:
+def initiator_build_init_message(state: HandshakeState) -> dict[str, Any]:
     """Build the INIT payload for the initiator."""
 
     if state.role is not HandshakeRole.INITIATOR:
@@ -235,8 +239,8 @@ def initiator_build_init_message(state: HandshakeState) -> Dict[str, Any]:
 
 def responder_process_init_and_build_resp(
     responder_state: HandshakeState,
-    init_payload: Dict[str, Any],
-) -> Dict[str, Any]:
+    init_payload: dict[str, Any],
+) -> dict[str, Any]:
     """Process the INIT payload and return the RESP payload."""
 
     if responder_state.role is not HandshakeRole.RESPONDER:
@@ -260,7 +264,7 @@ def responder_process_init_and_build_resp(
     return build_handshake_payload(responder_state)
 
 
-def initiator_process_resp(initiator_state: HandshakeState, resp_payload: Dict[str, Any]) -> None:
+def initiator_process_resp(initiator_state: HandshakeState, resp_payload: dict[str, Any]) -> None:
     """Process the RESP payload and finalize the initiator state."""
 
     if initiator_state.role is not HandshakeRole.INITIATOR:
@@ -296,7 +300,7 @@ def create_handshake_init_message(state: HandshakeState) -> EnigmaticMessage:
     )
 
 
-def create_handshake_resp_message(state: HandshakeState, resp_payload: Dict[str, Any]) -> EnigmaticMessage:
+def create_handshake_resp_message(state: HandshakeState, resp_payload: dict[str, Any]) -> EnigmaticMessage:
     """Wrap a responder payload in an EnigmaticMessage container."""
 
     return EnigmaticMessage(
@@ -305,5 +309,19 @@ def create_handshake_resp_message(state: HandshakeState, resp_payload: Dict[str,
         channel=state.params.channel,
         intent="handshake",
         payload=resp_payload,
+    )
+
+
+def make_session_context_from_handshake(state: HandshakeState) -> SessionContext:
+    """Convert a completed :class:`HandshakeState` into a :class:`SessionContext`."""
+
+    if state.phase is not HandshakePhase.COMPLETE or state.session_key is None:
+        raise ValueError("Handshake state must be complete with a session key")
+    return SessionContext(
+        session_id=state.params.session_id,
+        channel=state.params.channel,
+        dialect=state.params.dialect,
+        created_at=state.params.created_at,
+        session_key=state.session_key,
     )
 

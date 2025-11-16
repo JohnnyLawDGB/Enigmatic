@@ -1,11 +1,17 @@
-"""Dialect loader for symbolic Enigmatic patterns."""
+"""Dialect loader for symbolic Enigmatic patterns.
+
+Session-aware dialects allow legitimate systems to declare which signals must be
+protected by an established cryptographic session.  This file keeps the schema
+simple and declarative while deferring the actual security to the handshake and
+AEAD helpers elsewhere in the package.
+"""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
@@ -25,8 +31,10 @@ class DialectSymbol:
     anchors: list[float]
     micros: list[float]
     intent: str | None = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     dialect_name: str | None = None
+    requires_session: bool = False
+    session_scope: str | None = None
 
 
 @dataclass
@@ -35,7 +43,7 @@ class Dialect:
 
     name: str
     description: str
-    symbols: Dict[str, DialectSymbol]
+    symbols: dict[str, DialectSymbol]
     fee_punctuation: float
 
 
@@ -72,7 +80,7 @@ def load_dialect(path: str | Path) -> Dialect:
     if not isinstance(raw_symbols, dict) or not raw_symbols:
         raise DialectError(f"Dialect {name} must define at least one symbol")
 
-    symbols: Dict[str, DialectSymbol] = {}
+    symbols: dict[str, DialectSymbol] = {}
     for symbol_name, payload in raw_symbols.items():
         if not isinstance(payload, dict):
             raise DialectError(f"Symbol {symbol_name} must be a mapping")
@@ -91,6 +99,14 @@ def load_dialect(path: str | Path) -> Dialect:
         metadata = payload.get("metadata") or {}
         if not isinstance(metadata, dict):
             raise DialectError(f"Symbol {symbol_name} metadata must be a mapping")
+        requires_session = bool(payload.get("requires_session", False))
+        session_scope = payload.get("session_scope")
+        if session_scope is not None and not isinstance(session_scope, str):
+            raise DialectError(
+                f"Symbol {symbol_name} session_scope must be a string or null"
+            )
+        if requires_session and not session_scope:
+            session_scope = "channel"
         symbols[symbol_name] = DialectSymbol(
             name=symbol_name,
             description=desc,
@@ -99,6 +115,8 @@ def load_dialect(path: str | Path) -> Dialect:
             intent=intent,
             metadata=dict(metadata),
             dialect_name=name,
+            requires_session=requires_session,
+            session_scope=session_scope,
         )
 
     dialect = Dialect(
@@ -111,14 +129,14 @@ def load_dialect(path: str | Path) -> Dialect:
     return dialect
 
 
-def _require_str(data: Dict[str, Any], key: str, error: str) -> str:
+def _require_str(data: dict[str, Any], key: str, error: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise DialectError(error)
     return value
 
 
-def _require_float(data: Dict[str, Any], key: str, error: str) -> float:
+def _require_float(data: dict[str, Any], key: str, error: str) -> float:
     value = data.get(key)
     try:
         return float(value)
@@ -126,7 +144,7 @@ def _require_float(data: Dict[str, Any], key: str, error: str) -> float:
         raise DialectError(error) from exc
 
 
-def _require_float_list(data: Dict[str, Any], key: str, error: str) -> list[float]:
+def _require_float_list(data: dict[str, Any], key: str, error: str) -> list[float]:
     value = data.get(key)
     if not isinstance(value, list) or not value:
         raise DialectError(error)

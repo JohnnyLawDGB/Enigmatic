@@ -1,23 +1,34 @@
-"""Domain models for the Enigmatic DigiByte protocol."""
+"""Domain models for the Enigmatic DigiByte protocol.
+
+The data structures defined here describe how payloads are represented both in
+plaintext form and when wrapped by the optional encryption helpers.  They exist
+purely to support legitimate coordination, presence, and identity signals built
+on top of Enigmatic's numeric transport patterns.
+"""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, List
 
 from .encryption import EncryptedPayload, decrypt_payload
 
 
 @dataclass
 class EnigmaticMessage:
-    """High-level semantic message passed between Enigmatic peers."""
+    """High-level semantic message passed between Enigmatic peers.
+
+    When ``encrypted`` is ``True`` the ``payload`` is expected to contain a
+    single ``{"encrypted": {...}}`` block describing the serialized ciphertext
+    produced by :func:`enigmatic_dgb.encryption.encrypt_payload`.
+    """
 
     id: str
     timestamp: datetime
     channel: str
     intent: str
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     encrypted: bool = False
 
 
@@ -30,7 +41,7 @@ def message_with_encrypted_payload(
     return replace(base_message, payload=payload_wrapper, encrypted=True)
 
 
-def message_decrypt_payload(message: EnigmaticMessage, passphrase: str) -> Dict[str, Any]:
+def message_decrypt_payload(message: EnigmaticMessage, passphrase: str) -> dict[str, Any]:
     """Return the plaintext payload for *message* using *passphrase* when needed."""
 
     if not message.encrypted:
