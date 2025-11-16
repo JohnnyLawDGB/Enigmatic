@@ -36,12 +36,32 @@ Each output \( out_j \) has:
 
 ---
 
-**Definition 3.3 (UTXO Set \(U\)).**  
+**Definition 3.3 (UTXO Set \(U\)).**
 At height \(h\), the UTXO set \(U_h\) is the set of all unspent outputs of
 transactions in \(L\) up to height \(h\).
 
 Enigmatic treats elements of \(U_h\) as **registers** in a distributed state
 machine.
+
+**Definition 3.4 (State Vector \(\mathbf{s}(t)\)).**
+For every transaction \(t\) participating in an Enigmatic stream, define the
+state vector:
+
+\[
+\mathbf{s}(t) = (v_t, f_t, m_t, n_t, \Delta h_t, \sigma_t)
+\]
+
+where:
+
+- \(v_t\) — canonical value header (Value plane)
+- \(f_t\) — fee band representative (Fee plane)
+- \(m_t, n_t\) — input / output counts (Cardinality plane)
+- \(\Delta h_t = height(t) - height(t^- )\) — block interval to the previous
+  transaction in the stream (Block plane)
+- \(\sigma_t\) — cluster symmetry indicator as defined in §2.3.1 (Topology / Cardinality planes)
+
+The vector evolves over time, giving observers a telemetry-grade view of the
+swarm’s state.
 
 ---
 
@@ -68,8 +88,34 @@ where:
 - \(F_t = \sum IN_t - \sum OUT_t\)  
 - \(C_t = (|IN_t|, |OUT_t|)\)  
 - \(G_t\) is the local UTXO graph neighborhood  
-- \(H_t = (height(t), hash(B_{height(t)}))\)  
-- \(R_t\) is any OP_RETURN content.  
+- \(H_t = (height(t), hash(B_{height(t)}))\)
+- \(R_t\) is any OP_RETURN content.
+
+**Lemma 3.1 (Plane Orthogonality).**
+If the encoder selects \(V_t, F_t, C_t, H_t\) from disjoint dictionaries with
+non-overlapping constraints, then knowledge of one component does not reduce the
+entropy of the others beyond the dialect’s published correlations.
+
+*Proof sketch.* Each plane is negotiated independently in the dialect (cf.
+`specs/02-encoding-primitives.md`). The product space \(V \times F \times C \times
+H\) forms a direct sum of sub-channels, so mutual information is limited to
+explicit constraints such as reserved markers (Table 2.8). Therefore, an
+observer must decode each plane separately, enabling **parallel message
+streams** (e.g., a telemetry heartbeat on \(F\) while a consensus proof rides on
+\(C\)).
+
+**Example 3.1 (Multi-Agent State Synchronization).**
+Consider a swarm of \(N = 21\) nodes running a heartbeat dialect. Each agent
+emits transactions with \(\mathbf{s}(t) = (21.21, 0.21, 21, 21, 3, +1)\).
+Because \(\Delta h = 3\) and \(\sigma = +1\) (mirrored clusters), every peer can
+verify:
+
+1. Liveness (heartbeats arrive every 3 blocks within tolerance).
+2. Membership (cardinality matches the negotiated quorum).
+3. Consensus state (value/fee headers align with `FRAME_SYNC`).
+
+Deviations—e.g., \(\Delta h = 1\) or \(\sigma = -1\)—signal negotiation phases
+or alerts, enabling state synchronization without exchanging plaintext payloads.
 
 ---
 

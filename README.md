@@ -13,6 +13,25 @@ Instead of adding new opcodes or data layers, Enigmatic treats:
 
 as **programmable symbols** in a formally defined encoding scheme.
 
+### State Planes Quick Reference
+
+| Plane             | Conveyed variables                              | Example usage                          | Specification links |
+| ----------------- | ------------------------------------------------ | -------------------------------------- | ------------------- |
+| **Value**         | Amount, repetition, fee invariance headers       | `21.21` / `7.00` alternating beacons   | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
+| **Fee**           | Timing offsets, jitter bands                     | `0.21` cadence to mark heartbeats      | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
+| **Cardinality**   | Input/output sizes, ordering, cluster symmetry   | `21 in / 21 out` mirrored swarms       | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
+| **Topology**      | Output structure, graph motifs, ordering windows | Fan-out trees, ring confirmations      | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
+| **Block placement** | Block interval alignment, timing, repetition   | `Δheight = 3` heartbeat scheduling     | [`specs/04-encoding-process.md`](specs/04-encoding-process.md), [`specs/05-decoding-process.md`](specs/05-decoding-process.md) |
+| **Auxiliary (OP_RETURN / metadata)** | Optional payload hints        | Hash commitments, dialect selectors    | [`specs/01-protocol-overview.md`](specs/01-protocol-overview.md) |
+
+Each plane evolves independently yet composes into a **state vector** (amount, fee, cardinality, topology, block placement) that conveys telemetry-style information rather than plaintext characters.
+
+### Telemetry vs. Cipher Framing
+
+- **Telemetry mindset:** Treat transactions as multi-dimensional heartbeats or consensus proofs. Variables such as timing, repetition, and cluster symmetry act like sensor channels that reveal system state to peers observing the ledger.
+- **Classical cipher mindset:** Focuses on transforming ASCII payloads via substitution or encryption before transport. Enigmatic intentionally avoids this framing; the message emerges from how state variables co-vary across planes.
+- **Implication for contributors:** When designing new dialects, think in terms of *state synchronization* and *multi-agent negotiation* (see `specs/04-encoding-process.md` and `specs/05-decoding-process.md`) rather than letter-level encoding tricks.
+
 This repository contains the **protocol specification**, **whitepaper**, and
 **reference examples** for Enigmatic on DigiByte.
 
@@ -50,10 +69,12 @@ specs/
   05-decoding-process.md
   06-security-model.md
   07-implementation-notes.md
+  08-dialects.md
 
 examples/
   example-transaction-pattern.md
   example-decoding-flow.md
+  dialect-heartbeat.yaml
 ```
 
 You can also place a PDF version of the whitepaper in `docs/`:
