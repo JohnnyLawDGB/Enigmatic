@@ -1,79 +1,115 @@
 name: intel
 version: 0.1.0
 description: >-
-  High-attention telemetry dialect inspired by the INTEL traffic captured on
-  DigiByte around height 15558700. It focuses on carved anchors at 217 / 152 /
-  352 / 866 with a tight 0.21 fee cadence and micro-value sub-symbols.
+  INTEL dialect modeled after the DigiByte captures around height 15,558,700.
+  It keeps the 0.21 DGB fee invariant while weaving 217 / 152 / 352 / 866
+  anchors into programmable symbols for the enigmatic_rpc helper.
 planes:
   value:
     - header: 217.0
-      label: CHANNEL_LINK
-      semantics: Selects or announces a lane/channel before emitting payload.
+      label: CHANNEL_IDENTITY
+      description: Primary channel and operator identity marker.
     - header: 152.0
-      label: SYNC_ACK
-      semantics: Verifies block alignment + sync state.
+      label: ACK_SYNC
+      description: Low-mass acknowledgement / sync confirmation frame.
     - header: 352.0
       label: PRESENCE
-      semantics: Broadcasts steady-state telemetry.
+      description: Routine presence ping.
     - header: 866.0
       label: HIGH_PRESENCE
-      semantics: Marks escalation, question, or emphasis bursts.
+      description: Intensified presence burst used for escalations.
   fee:
     - band: 0.21
       jitter: 0.004
-      semantics: Maintains 0.21 invariance as the metronome for packets.
+      description: Maintain a hard 0.21 DGB fee invariant with ±0.004 play.
   cardinality:
     - m: 2
       n: 3
       sigma: +1
-      semantics: Spend two or three UTXOs, emit up to three outputs (anchor + change).
+      description: Typical packets spend two or three inputs and fan to three outputs.
     - m: 1
       n: 4
       sigma: 0
-      semantics: High-presence frames often fan into four balanced outputs.
+      description: High presence packets often expand into four balanced outputs.
   block:
     delta: 3
     tolerance: 1
-    semantics: Expect a fresh anchor every ~3 blocks as long as liquidity allows.
+    description: Expect a new emission every ~3 blocks unless liquidity is tight.
   micros:
     - amount: 0.152
-      label: EMPHASIS_FLAG
-      semantics: Mirrors the `152` anchor with micro precision to mark replies.
+      label: MICRO_SYNC
+      description: Mirrors the 152 anchor in micro precision for replies.
     - amount: 0.303
-      label: QUERY_FLAG
-      semantics: Interrogative / "reply requested" payload marker.
+      label: MICRO_QUERY
+      description: Optional interrogative suffix for questions / info requests.
     - amount: 0.004
-      label: BREADCRUMB
-      semantics: Dust shard carved from large parent UTXOs to tag the packet.
+      label: MICRO_BREADCRUMB
+      description: Dust shard carved off parents to mark experiments.
 symbols:
   - name: INTEL_HELLO
+    description: Channel greeting to announce identity while priming presence.
+    anchors:
+      required: [217.0]
+      optional_micros: [0.152, 0.004]
     match:
-      anchors: [217.0, 152.0, 352.0]
-      micros: [0.152]
+      value: 217.0
       fee: 0.21
+      m: 2
+      n: 3
       delta: 3
-      notes: Mirrors observed packets to say "I see you".
+      sigma: +1
+    scheduling:
+      cadence_blocks: 3
+      target_block_skew: 1
+      notes: Land shortly after the previous heartbeat for continuity.
+  - name: INTEL_SYNC
+    description: Lightweight ACK / SYNC symbol mirroring 152 emission bursts.
+    anchors:
+      required: [152.0]
+      optional_micros: [0.152]
+    match:
+      value: 152.0
+      fee: 0.21
+      m: 2
+      n: 2
+      delta: 2
+      sigma: 0
+    scheduling:
+      cadence_blocks: 2
+      target_block_skew: 1
+      notes: Fire quickly after INTEL_HELLO to lock alignment.
   - name: INTEL_PRESENCE
+    description: Routine presence beacon that refreshes the operator state.
+    anchors:
+      required: [352.0]
+      optional_micros: [0.004, 0.152]
     match:
-      anchors: [352.0]
-      micros: [0.004, 0.152]
+      value: 352.0
       fee: 0.21
+      m: 3
+      n: 3
       delta: 3
-      notes: Basic presence beacon.
+      sigma: +1
+    scheduling:
+      cadence_blocks: 3
+      target_block_skew: 1
+      notes: Maintain the three-block cadence unless congestion forces delay.
   - name: INTEL_HIGH_PRESENCE
+    description: Elevated presence burst using the 866 header and query micro.
+    anchors:
+      required: [352.0, 866.0]
+      optional_micros: [0.303]
     match:
-      anchors: [352.0, 866.0]
-      micros: [0.303]
+      value: 866.0
       fee: 0.21
-      delta: 3
-      notes: Elevated signal or question.
-  - name: INTEL_CHANNEL_LINK
-    match:
-      anchors: [217.0, 152.0]
-      micros: [0.004]
-      fee: 0.21
-      delta: 6
-      notes: Establishes / refreshes the channel binding.
+      m: 1
+      n: 4
+      delta: 4
+      sigma: 0
+    scheduling:
+      cadence_blocks: 4
+      target_block_skew: 2
+      notes: Reserved for escalations; leave extra drift to avoid collisions.
 automation:
   rpc:
     endpoint: http://127.0.0.1:14022
