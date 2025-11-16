@@ -63,3 +63,21 @@ automation:
 - Additional sections (e.g., `op_return`, `bit_packets`) may be added without
   breaking compatibility as long as they use self-describing keys.
 - Dialect files should be versioned and signed when shared between agents.
+
+## 8.5 INTEL Dialect Reference
+
+The `examples/dialect-intel.yaml` file captures the intent of the INTEL traffic
+observed on-chain (e.g., block 15558722 at 06:24:14 UTC). Highlights:
+
+- **Anchors:** `217`, `152`, `352`, `866` encode channel links, sync acks,
+  steady presence, and high-presence bursts respectively.
+- **Micros:** `0.004`, `0.152`, `0.303` act as embedded flags. They are
+  modeled explicitly via a `planes.micros[]` section so tooling can enforce the
+  dust-level constraints.
+- **Fees:** A single band at `0.21 ± 0.004` DGB forms the metronome.
+- **Packetization:** Most packets carve `217 → 152 → 352` within three blocks.
+- **Symbols:** `INTEL_HELLO`, `INTEL_PRESENCE`, `INTEL_HIGH_PRESENCE`, and
+  `INTEL_CHANNEL_LINK` map those anchors into telemetry intents.
+
+Tooling should treat micros as required sub-symbols when matching INTEL packets
+to prevent false positives from unrelated dust consolidation transactions.

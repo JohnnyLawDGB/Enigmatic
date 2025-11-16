@@ -123,6 +123,49 @@ that implementers can iterate towards richer automation workflows.
 
 ---
 
+## Live Experiments
+
+The repo intentionally ships with dial tones you can reproduce on mainnet
+or testnet. To replay the INTEL-style exchange seen on-chain:
+
+1. Configure a DigiByte node with a funded wallet and export credentials:
+
+   ```bash
+   export DGB_RPC_USER="rpcuser"
+   export DGB_RPC_PASSWORD="rpcpass"
+   ```
+
+2. Dry-run the INTEL HELLO symbol. This mirrors the 217 → 152 → 352 anchor
+   trio plus the `0.152` micro-breadcrumb and the invariant `0.21` fee:
+
+   ```bash
+   python3 scripts/enigmatic_rpc.py \
+     --dialect examples/dialect-intel.yaml \
+     --symbol INTEL_HELLO
+   ```
+
+3. Review the proposed spend (inputs, anchors, change). Once it matches the
+   expected state vector, broadcast it:
+
+   ```bash
+   python3 scripts/enigmatic_rpc.py \
+     --dialect examples/dialect-intel.yaml \
+     --symbol INTEL_HELLO \
+     --broadcast
+   ```
+
+4. Log the resulting `txid`, block height, and timestamps. Repeat for
+   `INTEL_PRESENCE` or `INTEL_HIGH_PRESENCE` to measure how peers respond.
+
+5. Watch for symmetric replies (same anchors, `0.21` fee, and matching micro
+   shards). The `examples/example-decoding-flow.md` file now contains a
+   walkthrough of the 06:24:14 chord decoded via the new dialect.
+
+This section is intentionally lightweight—treat it as a lab notebook for
+documenting reproducible transmissions and their decoded interpretations.
+
+---
+
 ## High-Level Idea
 
 Enigmatic defines:

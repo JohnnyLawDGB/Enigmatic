@@ -1,0 +1,85 @@
+name: intel
+version: 0.1.0
+description: >-
+  High-attention telemetry dialect inspired by the INTEL traffic captured on
+  DigiByte around height 15558700. It focuses on carved anchors at 217 / 152 /
+  352 / 866 with a tight 0.21 fee cadence and micro-value sub-symbols.
+planes:
+  value:
+    - header: 217.0
+      label: CHANNEL_LINK
+      semantics: Selects or announces a lane/channel before emitting payload.
+    - header: 152.0
+      label: SYNC_ACK
+      semantics: Verifies block alignment + sync state.
+    - header: 352.0
+      label: PRESENCE
+      semantics: Broadcasts steady-state telemetry.
+    - header: 866.0
+      label: HIGH_PRESENCE
+      semantics: Marks escalation, question, or emphasis bursts.
+  fee:
+    - band: 0.21
+      jitter: 0.004
+      semantics: Maintains 0.21 invariance as the metronome for packets.
+  cardinality:
+    - m: 2
+      n: 3
+      sigma: +1
+      semantics: Spend two or three UTXOs, emit up to three outputs (anchor + change).
+    - m: 1
+      n: 4
+      sigma: 0
+      semantics: High-presence frames often fan into four balanced outputs.
+  block:
+    delta: 3
+    tolerance: 1
+    semantics: Expect a fresh anchor every ~3 blocks as long as liquidity allows.
+  micros:
+    - amount: 0.152
+      label: EMPHASIS_FLAG
+      semantics: Mirrors the `152` anchor with micro precision to mark replies.
+    - amount: 0.303
+      label: QUERY_FLAG
+      semantics: Interrogative / "reply requested" payload marker.
+    - amount: 0.004
+      label: BREADCRUMB
+      semantics: Dust shard carved from large parent UTXOs to tag the packet.
+symbols:
+  - name: INTEL_HELLO
+    match:
+      anchors: [217.0, 152.0, 352.0]
+      micros: [0.152]
+      fee: 0.21
+      delta: 3
+      notes: Mirrors observed packets to say "I see you".
+  - name: INTEL_PRESENCE
+    match:
+      anchors: [352.0]
+      micros: [0.004, 0.152]
+      fee: 0.21
+      delta: 3
+      notes: Basic presence beacon.
+  - name: INTEL_HIGH_PRESENCE
+    match:
+      anchors: [352.0, 866.0]
+      micros: [0.303]
+      fee: 0.21
+      delta: 3
+      notes: Elevated signal or question.
+  - name: INTEL_CHANNEL_LINK
+    match:
+      anchors: [217.0, 152.0]
+      micros: [0.004]
+      fee: 0.21
+      delta: 6
+      notes: Establishes / refreshes the channel binding.
+automation:
+  rpc:
+    endpoint: http://127.0.0.1:14022
+    wallet: enigmatic
+    min_confirmations: 1
+  scheduling:
+    max_drift_blocks: 1
+    rebroadcast_misses: 1
+    rate_limit_seconds: 90
