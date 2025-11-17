@@ -22,6 +22,7 @@ or broadcast state vectors.
 | `example1.md` / `example2.md` | Quick math exercises showing how value-plane encoding recovers integers. |
 | `appendix_math.md` | Notes on the modular arithmetic backing the value plane. |
 | `diagram_channels.png` | Visual showing overlapping channels; handy for presentations. |
+| `2025-11-17-intel-continuation-analysis.md` | Continuation analysis of the 2025-11-17 DigiByte “intel” traffic, highlighting the 64.0 anchor and preserved invariants. |
 
 When you add a new example, update this table with a short sentence describing
 what a reviewer should look for.
