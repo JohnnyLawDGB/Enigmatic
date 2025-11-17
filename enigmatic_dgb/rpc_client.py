@@ -8,6 +8,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 from requests import Response
@@ -30,31 +31,92 @@ class ConfigurationError(RuntimeError):
 
 @dataclass
 class RPCConfig:
-    """Simple configuration container for RPC connection details."""
+    """Configuration container for DigiByte RPC connection details."""
 
     user: str
     password: str
     host: str = "127.0.0.1"
     port: int = 14022
     use_https: bool = False
+    wallet: str | None = None
+
+    @property
+    def base_url(self) -> str:
+        scheme = "https" if self.use_https else "http"
+        return f"{scheme}://{self.host}:{self.port}"
 
     @classmethod
     def from_env(cls) -> "RPCConfig":
         """Create configuration from standard DigiByte RPC environment variables."""
 
-        user = os.getenv("DGB_RPC_USER")
-        password = os.getenv("DGB_RPC_PASSWORD")
-        if not user or not password:
+        return cls.from_sources()
+
+    @classmethod
+    def from_sources(
+        cls,
+        *,
+        user: str | None = None,
+        password: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        use_https: bool | None = None,
+        wallet: str | None = None,
+        endpoint: str | None = None,
+    ) -> "RPCConfig":
+        """Assemble a config from CLI overrides, environment, and dialect defaults."""
+
+        env = os.environ
+        resolved_user = user or env.get("DGB_RPC_USER")
+        resolved_password = password or env.get("DGB_RPC_PASSWORD")
+        if not resolved_user or not resolved_password:
             raise ConfigurationError(
-                "DGB_RPC_USER and DGB_RPC_PASSWORD environment variables must be set"
+                "DGB_RPC_USER and DGB_RPC_PASSWORD must be provided via arguments or environment"
             )
-        host = os.getenv("DGB_RPC_HOST", "127.0.0.1")
-        port_str = os.getenv("DGB_RPC_PORT", "14022")
-        try:
-            port = int(port_str)
-        except ValueError as exc:
-            raise ConfigurationError("DGB_RPC_PORT must be an integer") from exc
-        return cls(user=user, password=password, host=host, port=port)
+
+        endpoint_host: str | None = None
+        endpoint_port: int | None = None
+        endpoint_https: bool | None = None
+        if endpoint:
+            parsed = urlparse(endpoint)
+            endpoint_host = parsed.hostname or None
+            endpoint_port = parsed.port or None
+            if parsed.scheme:
+                endpoint_https = parsed.scheme.lower() == "https"
+
+        env_host = env.get("DGB_RPC_HOST")
+        env_port_str = env.get("DGB_RPC_PORT")
+        env_port = None
+        if env_port_str:
+            try:
+                env_port = int(env_port_str)
+            except ValueError as exc:
+                raise ConfigurationError("DGB_RPC_PORT must be an integer") from exc
+        env_wallet = env.get("DGB_RPC_WALLET")
+        env_https_raw = env.get("DGB_RPC_USE_HTTPS")
+        env_https: bool | None = None
+        if env_https_raw is not None:
+            env_https = env_https_raw.lower() in {"1", "true", "yes"}
+
+        resolved_host = host or endpoint_host or env_host or "127.0.0.1"
+        resolved_port = port or endpoint_port or env_port or 14022
+        resolved_https = (
+            use_https
+            if use_https is not None
+            else endpoint_https
+            if endpoint_https is not None
+            else env_https
+            if env_https is not None
+            else False
+        )
+        resolved_wallet = wallet or env_wallet
+        return cls(
+            user=resolved_user,
+            password=resolved_password,
+            host=resolved_host,
+            port=resolved_port,
+            use_https=resolved_https,
+            wallet=resolved_wallet,
+        )
 
 
 class DigiByteRPC:
@@ -63,9 +125,8 @@ class DigiByteRPC:
     def __init__(self, config: RPCConfig) -> None:
         self.config = config
         self._session = requests.Session()
-        self._url = (
-            f"{'https' if config.use_https else 'http'}://{config.host}:{config.port}"
-        )
+        self._base_url = config.base_url
+        self._wallet = config.wallet
 
     @classmethod
     def from_env(cls) -> "DigiByteRPC":
@@ -105,10 +166,24 @@ class DigiByteRPC:
             logger.error("HTTP error from RPC server: %s", exc)
             raise
 
+    @property
+    def _url(self) -> str:
+        if self._wallet:
+            return f"{self._base_url}/wallet/{self._wallet}"
+        return self._base_url
+
+    def set_wallet(self, wallet: str | None) -> None:
+        """Switch the RPC client to a different loaded wallet."""
+
+        self._wallet = wallet
+
     # Convenience wrappers -------------------------------------------------
 
     def getblockchaininfo(self) -> Dict[str, Any]:
         return self.call("getblockchaininfo")
+
+    def getblockcount(self) -> int:
+        return int(self.call("getblockcount"))
 
     def getblockhash(self, height: int) -> str:
         return self.call("getblockhash", [height])
@@ -135,6 +210,9 @@ class DigiByteRPC:
 
     def getnewaddress(self) -> str:
         return self.call("getnewaddress")
+
+    def getrawchangeaddress(self) -> str:
+        return self.call("getrawchangeaddress")
 
     def getbalance(self) -> float:
         return self.call("getbalance")

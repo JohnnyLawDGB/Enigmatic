@@ -23,7 +23,8 @@ from uuid import uuid4
 from .dialect import DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction
 from .model import EncodingConfig, EnigmaticMessage
-from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
+from .planner import AutomationDialect, PlanningError, SymbolPlanner
+from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
 from .session import SessionContext
 from .symbol_sender import SessionRequiredError, send_symbol
 from .tx_builder import TransactionBuilder
@@ -117,6 +118,53 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Dialect name tied to the provided session",
     )
+
+    planner_parser = subparsers.add_parser(
+        "plan-symbol",
+        help="Plan or broadcast a symbol defined in an automation dialect",
+    )
+    planner_parser.add_argument(
+        "--dialect-path",
+        default="examples/dialect-heartbeat.yaml",
+        help="Path to the automation dialect YAML file",
+    )
+    planner_parser.add_argument(
+        "--symbol",
+        help="Symbol name (defaults to the first entry in the dialect)",
+    )
+    planner_parser.add_argument(
+        "--receiver-address",
+        help="Optional receiver override for the value-plane output",
+    )
+    planner_parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="Broadcast the plan after inspection",
+    )
+    planner_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    planner_parser.add_argument("--rpc-host", help="Override RPC host")
+    planner_parser.add_argument(
+        "--rpc-port", type=int, help="Override RPC port (default from dialect)"
+    )
+    planner_parser.add_argument("--rpc-user", help="Override RPC username")
+    planner_parser.add_argument("--rpc-password", help="Override RPC password")
+    planner_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    https_group = planner_parser.add_mutually_exclusive_group()
+    https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    planner_parser.set_defaults(rpc_use_https=None)
 
     return parser
 
@@ -248,6 +296,31 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
     print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
+def _rpc_from_automation_args(args: argparse.Namespace, automation_endpoint: str, automation_wallet: str | None) -> DigiByteRPC:
+    config = RPCConfig.from_sources(
+        user=args.rpc_user,
+        password=args.rpc_password,
+        host=args.rpc_host,
+        port=args.rpc_port,
+        use_https=args.rpc_use_https,
+        wallet=args.rpc_wallet or automation_wallet,
+        endpoint=args.rpc_url or automation_endpoint,
+    )
+    return DigiByteRPC(config)
+
+
+def cmd_plan_symbol(args: argparse.Namespace) -> None:
+    dialect = AutomationDialect.load(args.dialect_path)
+    rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
+    planner = SymbolPlanner(rpc, dialect.automation)
+    symbol = dialect.get_symbol(args.symbol)
+    plan = planner.plan(symbol, receiver=args.receiver_address)
+    print(json.dumps(plan.to_jsonable(), indent=2))
+    if args.broadcast:
+        txid = planner.broadcast(plan)
+        print(json.dumps({"txid": txid}, separators=COMPACT_JSON_SEPARATORS))
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -258,11 +331,20 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_watch(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
+        elif args.command == "plan-symbol":
+            cmd_plan_symbol(args)
         else:  # pragma: no cover - argparse enforces choices
             raise CLIError(f"Unknown command: {args.command}")
     except KeyboardInterrupt:  # pragma: no cover - interactive use
         logger.info("Interrupted by user")
-    except (CLIError, ConfigurationError, RPCError, RuntimeError, DialectError) as exc:
+    except (
+        CLIError,
+        ConfigurationError,
+        RPCError,
+        RuntimeError,
+        DialectError,
+        PlanningError,
+    ) as exc:
         parser.exit(1, f"error: {exc}\n")
 
 

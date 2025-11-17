@@ -122,38 +122,42 @@ when reviewers need to diff layout.
 
 ## RPC Heartbeat Helper
 
-The repository ships with a lightweight orchestration script that speaks
-to a running DigiByte node via JSON-RPC and arranges transactions to match
-the state vectors defined in a dialect file (for example
-[`examples/dialect-heartbeat.yaml`](examples/dialect-heartbeat.yaml)).
+The automation workflow now lives inside the package CLI so that every
+tool depends on the same RPC client and validation stack. Use the
+`plan-symbol` command to inspect or broadcast a symbolic heartbeat defined
+in [`examples/dialect-heartbeat.yaml`](examples/dialect-heartbeat.yaml).
 
 ```bash
 export DGB_RPC_USER="rpcuser"
 export DGB_RPC_PASSWORD="rpcpass"
 
 # Dry run: prints the proposed inputs/outputs without broadcasting.
-python3 scripts/enigmatic_rpc.py \
-  --dialect examples/dialect-heartbeat.yaml \
+enigmatic-dgb plan-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
   --symbol HEARTBEAT
 
 # Broadcast the transaction once the plan looks correct.
-python3 scripts/enigmatic_rpc.py --symbol HEARTBEAT --broadcast
+enigmatic-dgb plan-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT \
+  --broadcast
 ```
 
-Key features:
+Highlights:
 
 - Loads the automation metadata (endpoint, wallet name, scheduling hints)
-  from the dialect file but allows overrides via CLI flags.
+  from the dialect file but allows overrides via CLI flags or
+  environment variables.
 - Selects UTXOs that satisfy the cardinality and value constraints defined
   for the symbol.
 - Splits change outputs to preserve the desired output cardinality while
   respecting DigiByte's dust limits.
-- Supports dry-run planning so that operators can audit the state vector
+- Supports dry-run planning so operators can audit the state vector
   before a transaction is signed and relayed.
 
-Ensure your node has the target wallet loaded and unlocked prior to
-invocation. The script purposefully emits human-readable planning data so
-that implementers can iterate towards richer automation workflows.
+Ensure your node has the target wallet loaded and unlocked before
+invocation. For end-to-end validation scenarios see
+[`docs/rpc_test_plan.md`](docs/rpc_test_plan.md).
 
 ## Documentation & Spec Map
 
@@ -193,21 +197,21 @@ or testnet. To replay the INTEL-style exchange seen on-chain:
 2. Dry-run the INTEL HELLO symbol. This mirrors the 217 → 152 → 352 anchor
    trio plus the `0.152` micro-breadcrumb and the invariant `0.21` fee:
 
-   ```bash
-   python3 scripts/enigmatic_rpc.py \
-     --dialect examples/dialect-intel.yaml \
-     --symbol INTEL_HELLO
-   ```
+    ```bash
+    enigmatic-dgb plan-symbol \
+      --dialect-path examples/dialect-intel.yaml \
+      --symbol INTEL_HELLO
+    ```
 
 3. Review the proposed spend (inputs, anchors, change). Once it matches the
    expected state vector, broadcast it:
 
-   ```bash
-   python3 scripts/enigmatic_rpc.py \
-     --dialect examples/dialect-intel.yaml \
-     --symbol INTEL_HELLO \
-     --broadcast
-   ```
+    ```bash
+    enigmatic-dgb plan-symbol \
+      --dialect-path examples/dialect-intel.yaml \
+      --symbol INTEL_HELLO \
+      --broadcast
+    ```
 
 4. Log the resulting `txid`, block height, and timestamps. Repeat for
    `INTEL_PRESENCE` or `INTEL_HIGH_PRESENCE` to measure how peers respond.
