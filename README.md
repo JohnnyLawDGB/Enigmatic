@@ -39,6 +39,33 @@ Each plane evolves independently yet composes into a **state vector** (amount, f
 This repository contains the **protocol specification**, **whitepaper**,
 **Python reference stack**, and **dial tone examples** for Enigmatic on DigiByte.
 
+## Non-Technical Primer
+
+If you are new to blockchains or protocol design, think of Enigmatic as a
+*coordination language* that uses ordinary DigiByte transactions as the words in
+a conversation:
+
+- **Wallet actions become signals.** Instead of embedding secret text inside a
+  transaction, Enigmatic changes how big the transaction is, what the fees look
+  like, and when it confirms. Observers who know the rules can read the pattern
+  the same way air-traffic controllers read blinking runway lights.
+- **Multiple "planes" act like knobs on a radio.** Value, fees, input counts,
+  graph shape, and block timing are tuned independently. Turning one knob may
+  indicate urgency while another might encode the intended recipient.
+- **No special software is required for the blockchain.** All transactions stay
+  valid, pay normal fees, and resemble day-to-day wallet traffic. The
+  intelligence is in how you choose and interpret the parameters.
+
+When designing or reviewing a dialect, ask two questions:
+
+1. *Is this transaction still boring to the rest of the network?* (It should be
+   indistinguishable from a routine payment.)
+2. *Can my counterpart extract the same meaning from the chosen pattern?*
+
+Keeping those questions in mind ensures Enigmatic remains practical for both
+operators and non-technical stakeholders who only need high-level assurance
+that the system behaves like regular DigiByte usage.
+
 ## Quickstart
 
 ```bash
@@ -206,9 +233,21 @@ Enigmatic defines:
 
 All encodings are:
 
-- Valid DigiByte transactions  
-- Economically plausible  
-- Steganographic by default: transaction flows look like normal wallet behavior  
+- Valid DigiByte transactions
+- Economically plausible
+- Steganographic by default: transaction flows look like normal wallet behavior
+
+### Deterministic Expression Dictionary
+
+| Expression | Plain-language meaning | Where it shows up |
+| ---------- | ---------------------- | ----------------- |
+| \\( \mathcal{M} \\) | The abstract "message space" — every possible intent, tag, or symbol Enigmatic can describe before it touches the blockchain. | `specs/01-protocol-overview.md`, `specs/02-encoding-primitives.md` |
+| \\( \mathcal{E}(M) \rightarrow t \\) | The encoding function: take a message from \\( \mathcal{M} \\) and turn it into a concrete DigiByte transaction \\( t \\). Think "planner" that chooses values, fees, and graph layout. | README, `specs/02-encoding-primitives.md` |
+| \\( \mathcal{D}(t) \rightarrow M' \\) | The decoding function: observe a real transaction and reconstruct the intended message. Comparable to a telemetry parser that turns sensor readings back into structured data. | README, `specs/03-formal-model.md` |
+| **State plane** | One dimension of the transaction (value, fee, cardinality, topology, block placement) that can carry information. | README table above, `specs/03-formal-model.md` |
+| **State vector** | The combination of all state planes for a single transaction. Equivalent to a row in a spreadsheet describing one heartbeat. | `specs/03-formal-model.md`, `specs/04-encoding-process.md` |
+| **Dialect** | A named ruleset that maps symbols to state vectors, similar to how Morse code maps dots and dashes to letters. | `examples/`, `specs/06-dialects.md` |
+| **Deterministic** | Means that given the same inputs (dialect + intent) the encoder will always choose the same transaction pattern, eliminating guesswork for the decoder. | README, specs generally |
 
 ---
 
