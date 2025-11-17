@@ -8,9 +8,12 @@ from enigmatic_dgb.planner import (
     AutomationDialect,
     AutomationMetadata,
     AutomationSymbol,
+    PatternPlan,
     PlanningError,
     SymbolPlan,
     SymbolPlanner,
+    broadcast_pattern_plan,
+    plan_explicit_pattern,
 )
 
 
@@ -139,3 +142,32 @@ def test_load_missing_symbol_section(tmp_path) -> None:
     path.write_text("symbols: []")
     with pytest.raises(PlanningError):
         AutomationDialect.load(path)
+
+
+def test_plan_explicit_pattern_builds_outputs() -> None:
+    rpc = DummyRPC()
+    plan = plan_explicit_pattern(
+        rpc,
+        to_address="dgb1target",
+        amounts=[Decimal("1.0"), Decimal("2.0"), Decimal("3.0")],
+        fee=Decimal("0.1"),
+    )
+    assert isinstance(plan, PatternPlan)
+    assert len(plan.outputs) == 3
+    assert plan.outputs[0].amount == Decimal("1.00000000")
+    assert plan.change_output is not None
+
+
+def test_broadcast_pattern_plan_uses_same_stack() -> None:
+    rpc = DummyRPC()
+    plan = plan_explicit_pattern(
+        rpc,
+        to_address="dgb1target",
+        amounts=[Decimal("1.0")],
+        fee=Decimal("0.1"),
+    )
+    txid = broadcast_pattern_plan(rpc, plan)
+    assert txid == "broadcast-txid"
+    inputs, outputs = rpc.last_tx
+    assert len(inputs) == len(plan.inputs)
+    assert len(outputs) >= len(plan.outputs)

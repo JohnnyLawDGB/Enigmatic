@@ -218,7 +218,9 @@ class DigiByteRPC:
         return self.call("getbalance")
 
     def createrawtransaction(
-        self, inputs: list[Dict[str, Any]], outputs: Dict[str, float]
+        self,
+        inputs: list[Dict[str, Any]],
+        outputs: Dict[str, float] | list[Dict[str, float]],
     ) -> str:
         return self.call("createrawtransaction", [inputs, outputs])
 
