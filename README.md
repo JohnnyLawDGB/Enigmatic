@@ -159,6 +159,33 @@ Ensure your node has the target wallet loaded and unlocked before
 invocation. For end-to-end validation scenarios see
 [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md).
 
+## Manual Pattern Sending
+
+When you want to experiment with raw numeric motifs (e.g., Fibonacci fan-outs
+or 21M ↔ 21B callbacks) without defining a formal dialect, use the
+`plan-pattern` command. It shares the same RPC plumbing as `plan-symbol` and
+lets you specify each output amount directly.
+
+```bash
+export DGB_RPC_USER="rpcuser"
+export DGB_RPC_PASSWORD="rpcpass"
+
+enigmatic-dgb plan-pattern \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 21.0,34.0,55.0,0.303 \
+  --fee 0.21
+
+# Once the plan looks good, re-run with --broadcast to sign + relay it.
+enigmatic-dgb plan-pattern \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 21.0,34.0,55.0,0.303 \
+  --fee 0.21 \
+  --broadcast
+```
+
+Each dry run prints the selected inputs, ordered outputs, fee, and change so
+you can audit the transaction before flipping the broadcast flag.
+
 ## Documentation & Spec Map
 
 - [`docs/README.md`](docs/README.md) — Human-readable guide to the whitepaper,

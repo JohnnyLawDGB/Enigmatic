@@ -120,6 +120,52 @@ class SymbolPlan:
         }
 
 
+@dataclass
+class PatternInput:
+    txid: str
+    vout: int
+    amount: Decimal
+
+    def to_jsonable(self) -> Dict[str, Any]:
+        return {"txid": self.txid, "vout": self.vout, "amount": str(self.amount)}
+
+
+@dataclass
+class PatternOutput:
+    address: str
+    amount: Decimal
+
+    def to_jsonable(self, index: int) -> Dict[str, Any]:
+        return {"index": index, "address": self.address, "amount": str(self.amount)}
+
+
+@dataclass
+class PatternPlan:
+    inputs: List[PatternInput]
+    outputs: List[PatternOutput]
+    change_output: PatternOutput | None
+    fee: Decimal
+
+    def as_rpc_inputs(self) -> List[Dict[str, Any]]:
+        return [{"txid": item.txid, "vout": item.vout} for item in self.inputs]
+
+    def as_rpc_outputs(self) -> List[Dict[str, float]]:
+        serialized = [{output.address: float(output.amount)} for output in self.outputs]
+        if self.change_output is not None:
+            serialized.append({self.change_output.address: float(self.change_output.amount)})
+        return serialized
+
+    def to_jsonable(self) -> Dict[str, Any]:
+        return {
+            "fee": str(self.fee),
+            "inputs": [item.to_jsonable() for item in self.inputs],
+            "outputs": [output.to_jsonable(index) for index, output in enumerate(self.outputs)],
+            "change": self.change_output.to_jsonable(len(self.outputs))
+            if self.change_output is not None
+            else None,
+        }
+
+
 class SymbolPlanner:
     def __init__(self, rpc: DigiByteRPC, automation: AutomationMetadata) -> None:
         self.rpc = rpc
@@ -210,3 +256,92 @@ class SymbolPlanner:
             outputs[address] = amount
             distributed += amount
         return outputs
+
+
+def plan_explicit_pattern(
+    rpc: DigiByteRPC,
+    *,
+    to_address: str,
+    amounts: Sequence[Decimal],
+    fee: Decimal,
+    min_confirmations: int = 1,
+) -> PatternPlan:
+    if not amounts:
+        raise PlanningError("At least one output amount must be provided")
+    normalized_amounts: list[Decimal] = []
+    total_pattern = Decimal("0")
+    for amount in amounts:
+        if amount <= 0:
+            raise PlanningError("Each output amount must be greater than zero")
+        quantized = amount.quantize(EIGHT_DP, rounding=ROUND_DOWN)
+        normalized_amounts.append(quantized)
+        total_pattern += quantized
+    if total_pattern <= 0:
+        raise PlanningError("Total output amount must be greater than zero")
+    if fee < 0:
+        raise PlanningError("Fee must be non-negative")
+    required_total = total_pattern + fee
+    utxos = rpc.listunspent(min_confirmations)
+    selected, total = _select_utxos_covering_total(utxos, required_total)
+    pattern_inputs = [
+        PatternInput(
+            txid=str(entry["txid"]),
+            vout=int(entry["vout"]),
+            amount=Decimal(str(entry["amount"])),
+        )
+        for entry in selected
+    ]
+    pattern_outputs = [
+        PatternOutput(address=to_address, amount=amount)
+        for amount in normalized_amounts
+    ]
+    change_amount = (total - required_total).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+    change_output: PatternOutput | None = None
+    if change_amount >= DUST_LIMIT:
+        change_address = rpc.getrawchangeaddress()
+        change_output = PatternOutput(address=change_address, amount=change_amount)
+    elif change_amount > 0 and pattern_outputs:
+        last = pattern_outputs[-1]
+        pattern_outputs[-1] = PatternOutput(
+            address=last.address,
+            amount=(last.amount + change_amount).quantize(EIGHT_DP, rounding=ROUND_DOWN),
+        )
+        change_amount = Decimal("0")
+    return PatternPlan(inputs=pattern_inputs, outputs=pattern_outputs, change_output=change_output, fee=fee)
+
+
+def broadcast_pattern_plan(rpc: DigiByteRPC, plan: PatternPlan) -> str:
+    raw_hex = rpc.createrawtransaction(plan.as_rpc_inputs(), plan.as_rpc_outputs())
+    signed = rpc.signrawtransactionwithwallet(raw_hex)
+    if not signed.get("complete"):
+        raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
+    return rpc.sendrawtransaction(signed["hex"])
+
+
+def _select_utxos_covering_total(
+    utxos: Sequence[Mapping[str, Any]], minimum_total: Decimal
+) -> tuple[list[Mapping[str, Any]], Decimal]:
+    spendable = [
+        utxo
+        for utxo in utxos
+        if utxo.get("spendable", True)
+    ]
+    if not spendable:
+        raise PlanningError("Wallet has no spendable UTXOs")
+    candidates = sorted(
+        spendable,
+        key=lambda item: Decimal(str(item["amount"])),
+        reverse=True,
+    )
+    selected: list[Mapping[str, Any]] = []
+    total = Decimal("0")
+    for utxo in candidates:
+        selected.append(utxo)
+        total += Decimal(str(utxo["amount"]))
+        if total >= minimum_total:
+            break
+    if total < minimum_total:
+        raise PlanningError(
+            f"Selected inputs total {total} but need at least {minimum_total} to cover requested outputs and fee"
+        )
+    return selected, total
