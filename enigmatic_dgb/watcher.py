@@ -117,6 +117,40 @@ class Watcher:
                         if entry.get("fee") is not None
                         else None
                     ),
+                    op_return_data=self._extract_op_return_data(str(txid)),
                 )
             )
         return observed
+
+    def _extract_op_return_data(self, txid: str) -> bytes | None:
+        """Return the first OP_RETURN payload for ``txid`` if available."""
+
+        try:
+            decoded = self.rpc.getrawtransaction(txid, True)
+        except Exception:  # pragma: no cover - RPC issues surfaced at call site
+            logger.debug("Failed to decode transaction %s for OP_RETURN", txid)
+            return None
+
+        if not isinstance(decoded, dict):
+            return None
+        for vout in decoded.get("vout", []) or []:
+            script = vout.get("scriptPubKey") or {}
+            if script.get("type") != "nulldata":
+                continue
+            asm = script.get("asm")
+            data_hex: str | None = None
+            if isinstance(asm, str):
+                parts = asm.split(" ", 1)
+                if len(parts) == 2:
+                    data_hex = parts[1]
+            if not data_hex:
+                maybe_hex = script.get("hex")
+                if isinstance(maybe_hex, str) and maybe_hex.startswith("6a"):
+                    data_hex = maybe_hex[2:]
+            if not data_hex:
+                continue
+            try:
+                return bytes.fromhex(data_hex)
+            except ValueError:  # pragma: no cover - malformed script
+                continue
+        return None

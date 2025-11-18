@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 from enigmatic_dgb.decoder import EnigmaticDecoder, ObservedTx, group_into_packets
@@ -56,3 +57,36 @@ def test_group_into_packets_respects_time_gaps() -> None:
     assert len(packets) == 2
     assert len(packets[0]) == 2
     assert len(packets[1]) == 1
+
+
+def test_encoder_emits_op_return_hint() -> None:
+    config = EncodingConfig.enigmatic_default()
+    message = EnigmaticMessage(
+        id="test",
+        timestamp=datetime.utcnow(),
+        channel="default",
+        intent="identity",
+        payload={"role": "handshake"},
+    )
+    encoder = EnigmaticEncoder(config, target_address="dgb1test")
+    instructions, _ = encoder.encode_message(message)
+
+    assert any(instruction.op_return_data for instruction in instructions)
+
+
+def test_decoder_includes_op_return_hint() -> None:
+    config = EncodingConfig.enigmatic_default()
+    decoder = EnigmaticDecoder(config)
+    hint = json.dumps({"hint": "demo"}).encode("utf-8")
+    packet = [
+        ObservedTx(
+            txid="hint",
+            timestamp=datetime.utcnow(),
+            amount=config.anchor_amounts[0],
+            op_return_data=hint,
+        )
+    ]
+
+    message = decoder.decode_packet(packet, channel="default")
+
+    assert message.payload["op_return"]["hint"] == "demo"

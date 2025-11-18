@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from .dialect import Dialect, DialectError, load_dialect
-from .encoder import EnigmaticEncoder, SpendInstruction
+from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instructions
 from .model import EncodingConfig
 from .rpc_client import DigiByteRPC
 from .session import SessionContext, session_key_to_passphrase
@@ -80,9 +80,9 @@ def send_symbol(
     if not instructions:
         raise RuntimeError("Symbol encoding produced no spend instructions")
 
-    outputs = _aggregate_outputs(instructions)
+    outputs, op_returns = aggregate_spend_instructions(instructions)
     builder = TransactionBuilder(rpc)
-    txid = builder.send_payment_tx(outputs, fee)
+    txid = builder.send_payment_tx(outputs, fee, op_return_data=[data.hex() for data in op_returns])
     logger.info(
         "Sent symbol %s for channel %s via txid %s", symbol.name, message.channel, txid
     )
@@ -112,14 +112,6 @@ def load_and_send_symbol(
         encrypt_with_passphrase=encrypt_with_passphrase,
         session=session,
     )
-
-
-def _aggregate_outputs(instructions: list[SpendInstruction]) -> dict[str, float]:
-    outputs: dict[str, float] = {}
-    for instruction in instructions:
-        outputs.setdefault(instruction.to_address, 0.0)
-        outputs[instruction.to_address] += instruction.amount
-    return outputs
 
 
 def parse_extra_payload(extra_payload_json: str | None) -> dict[str, Any]:

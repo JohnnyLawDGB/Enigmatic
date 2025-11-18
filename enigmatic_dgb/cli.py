@@ -22,7 +22,7 @@ from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
 from .dialect import DialectError, load_dialect
-from .encoder import EnigmaticEncoder, SpendInstruction
+from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instructions
 from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
@@ -278,11 +278,11 @@ def _chunk_instructions(
     return chunks
 
 
-def _aggregate_outputs(instructions: Iterable[SpendInstruction]) -> dict[str, float]:
-    outputs: dict[str, float] = defaultdict(float)
-    for instruction in instructions:
-        outputs[instruction.to_address] += instruction.amount
-    return dict(outputs)
+def _aggregate_outputs(
+    instructions: Iterable[SpendInstruction],
+) -> tuple[dict[str, float], list[str]]:
+    outputs, op_returns = aggregate_spend_instructions(instructions)
+    return outputs, [data.hex() for data in op_returns]
 
 
 def cmd_send_message(args: argparse.Namespace) -> None:
@@ -308,8 +308,8 @@ def cmd_send_message(args: argparse.Namespace) -> None:
     builder = TransactionBuilder(rpc)
     txids: list[str] = []
     for chunk in _chunk_instructions(instructions, MAX_OUTPUTS_PER_TX):
-        outputs = _aggregate_outputs(chunk)
-        txid = builder.send_payment_tx(outputs, fee)
+        outputs, op_returns = _aggregate_outputs(chunk)
+        txid = builder.send_payment_tx(outputs, fee, op_return_data=op_returns)
         txids.append(txid)
 
     result = {"message_id": message.id, "txids": txids}
