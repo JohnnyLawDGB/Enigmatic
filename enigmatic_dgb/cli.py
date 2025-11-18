@@ -903,6 +903,18 @@ def _format_script_plane(script_plane: ScriptPlane | None) -> str:
     descriptor = "/".join(parts)
     if script_plane.branch_id is not None:
         descriptor += f" branch {script_plane.branch_id}"
+    aggregation = script_plane.aggregation
+    if aggregation and not aggregation.is_default():
+        agg_parts = [aggregation.aggregation_mode]
+        if aggregation.signer_set_id:
+            agg_parts.append(str(aggregation.signer_set_id))
+        if aggregation.threshold is not None and aggregation.total_signers is not None:
+            agg_parts.append(f"{aggregation.threshold}/{aggregation.total_signers}")
+        elif aggregation.threshold is not None:
+            agg_parts.append(f"threshold={aggregation.threshold}")
+        elif aggregation.total_signers is not None:
+            agg_parts.append(f"m={aggregation.total_signers}")
+        descriptor += " agg " + " ".join(agg_parts)
     return descriptor
 
 
