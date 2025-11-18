@@ -217,6 +217,9 @@ class DigiByteRPC:
     def getbalance(self) -> float:
         return self.call("getbalance")
 
+    def gettransaction(self, txid: str, include_watchonly: bool = True) -> Dict[str, Any]:
+        return self.call("gettransaction", [txid, include_watchonly])
+
     def createrawtransaction(
         self,
         inputs: list[Dict[str, Any]],

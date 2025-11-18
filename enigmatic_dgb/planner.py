@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN, getcontext
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Sequence
 
 import yaml
 
 from .rpc_client import DigiByteRPC
+from .tx_builder import TransactionBuilder
 
 getcontext().prec = 16
 
 DUST_LIMIT = Decimal("0.00010000")
 EIGHT_DP = Decimal("0.00000001")
 PREVIOUS_CHANGE_SENTINEL = "__PREVIOUS_CHANGE__"
+
+ProgressCallback = Callable[[str], None]
 
 
 class PlanningError(RuntimeError):
@@ -253,12 +258,30 @@ class PlannedChain:
 
     to_address: str
     transactions: List[PlannedTx]
+    initial_utxos: List[PatternInput]
 
     def to_jsonable(self) -> Dict[str, Any]:
         return {
             "to_address": self.to_address,
             "transactions": [tx.to_jsonable(index) for index, tx in enumerate(self.transactions)],
+            "initial_utxos": [entry.to_jsonable() for entry in self.initial_utxos],
         }
+
+    def as_pattern_sequence(self) -> PatternPlanSequence:
+        """Convert the planned chain into a pattern sequence for broadcasting."""
+
+        steps: list[PatternPlan] = []
+        for tx in self.transactions:
+            outputs = [tx.to_output]
+            steps.append(
+                PatternPlan(
+                    inputs=tx.inputs,
+                    outputs=outputs,
+                    change_output=tx.change_output,
+                    fee=tx.fee,
+                )
+            )
+        return PatternPlanSequence(steps=steps)
 
 
 class SymbolPlanner:
@@ -301,6 +324,7 @@ class SymbolPlanner:
         *,
         receiver: str | None = None,
         max_frames: int | None = None,
+        min_confirmations: int | None = None,
     ) -> PlannedChain:
         """Plan a chained representation of a symbol using its declared frames."""
         frames = symbol.chained_frames()
@@ -327,11 +351,17 @@ class SymbolPlanner:
         if required_inputs <= 0:
             raise PlanningError("Chained plan requires at least one input in the first frame")
         total_required = sum(frame.value + frame.fee for frame in normalized_frames)
-        utxos = self.rpc.listunspent(self.automation.min_confirmations)
+        minconf = (
+            min_confirmations
+            if min_confirmations is not None
+            else self.automation.min_confirmations
+        )
+        utxos = self.rpc.listunspent(minconf)
         selected, total = self._select_utxos(utxos, required_inputs, total_required)
         transactions: list[PlannedTx] = []
         available_pool = total
         previous_change_amount: Decimal | None = None
+        initial_utxos: list[PatternInput] | None = None
         for index, frame in enumerate(normalized_frames):
             fee = frame.fee
             if fee < 0:
@@ -387,6 +417,8 @@ class SymbolPlanner:
                         ),
                     )
                 previous_change_amount = None
+            if index == 0:
+                initial_utxos = list(inputs)
             transactions.append(
                 PlannedTx(
                     inputs=inputs,
@@ -395,7 +427,13 @@ class SymbolPlanner:
                     fee=fee,
                 )
             )
-        return PlannedChain(to_address=to_address, transactions=transactions)
+        assert initial_utxos is not None  # for mypy; first frame always sets it
+        funding_inputs = [item for item in initial_utxos if item.txid != PREVIOUS_CHANGE_SENTINEL]
+        return PlannedChain(
+            to_address=to_address,
+            transactions=transactions,
+            initial_utxos=funding_inputs,
+        )
 
     def broadcast(self, plan: SymbolPlan) -> str:
         outputs_json = {addr: float(amount) for addr, amount in plan.outputs.items()}
@@ -405,33 +443,28 @@ class SymbolPlanner:
             raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
         return self.rpc.sendrawtransaction(signed["hex"])
 
-    def broadcast_chain(self, plan: PlannedChain) -> list[str]:
+    def broadcast_chain(
+        self,
+        plan: PlannedChain,
+        *,
+        wait_between_txs: float = 0.0,
+        min_confirmations_between_steps: int = 0,
+        max_wait_seconds: float | None = None,
+        progress_callback: ProgressCallback | None = None,
+        builder: TransactionBuilder | None = None,
+    ) -> list[str]:
         """Broadcast each transaction in a chained plan sequentially."""
-        txids: list[str] = []
-        previous_change_ref: tuple[str, int] | None = None
-        for tx in plan.transactions:
-            rpc_inputs: list[Dict[str, Any]] = []
-            for item in tx.inputs:
-                if item.txid == PREVIOUS_CHANGE_SENTINEL:
-                    if previous_change_ref is None:
-                        raise PlanningError(
-                            "Chained broadcast referenced a change output before it existed"
-                        )
-                    rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
-                else:
-                    rpc_inputs.append({"txid": item.txid, "vout": item.vout})
-            outputs = tx.as_rpc_outputs()
-            raw_hex = self.rpc.createrawtransaction(rpc_inputs, outputs)
-            signed = self.rpc.signrawtransactionwithwallet(raw_hex)
-            if not signed.get("complete"):
-                raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
-            txid = self.rpc.sendrawtransaction(signed["hex"])
-            txids.append(txid)
-            if tx.change_output is not None:
-                previous_change_ref = (txid, 1)
-            else:
-                previous_change_ref = None
-        return txids
+
+        pattern_sequence = plan.as_pattern_sequence()
+        return broadcast_pattern_plan(
+            self.rpc,
+            pattern_sequence,
+            wait_between_txs=wait_between_txs,
+            min_confirmations_between_steps=min_confirmations_between_steps,
+            max_wait_seconds=max_wait_seconds,
+            progress_callback=progress_callback,
+            builder=builder,
+        )
 
     def _select_utxos(
         self,
@@ -571,32 +604,128 @@ def plan_explicit_pattern(
     return PatternPlanSequence(steps=steps)
 
 
-def broadcast_pattern_plan(rpc: DigiByteRPC, plan: PatternPlanSequence) -> list[str]:
+def broadcast_pattern_plan(
+    rpc: DigiByteRPC,
+    plan: PatternPlanSequence,
+    *,
+    op_returns: Sequence[str | None] | None = None,
+    wait_between_txs: float = 0.0,
+    min_confirmations_between_steps: int = 0,
+    max_wait_seconds: float | None = None,
+    progress_callback: ProgressCallback | None = None,
+    builder: TransactionBuilder | None = None,
+) -> list[str]:
+    """Broadcast a chained pattern plan using the transaction builder."""
+
+    if op_returns is not None and len(op_returns) != len(plan.steps):
+        raise PlanningError("OP_RETURN payload count must match the number of transactions")
+
+    tx_builder = builder or TransactionBuilder(rpc)
     txids: list[str] = []
     previous_change_ref: tuple[str, int] | None = None
-    for step in plan.steps:
-        rpc_inputs: list[Dict[str, Any]] = []
-        for entry in step.inputs:
-            if entry.txid == PREVIOUS_CHANGE_SENTINEL:
-                if previous_change_ref is None:
-                    raise PlanningError(
-                        "Chained plan referenced previous change output before it was created"
-                    )
-                rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
-            else:
-                rpc_inputs.append({"txid": entry.txid, "vout": entry.vout})
-        outputs = step.as_rpc_outputs()
-        raw_hex = rpc.createrawtransaction(rpc_inputs, outputs)
-        signed = rpc.signrawtransactionwithwallet(raw_hex)
-        if not signed.get("complete"):
-            raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
-        txid = rpc.sendrawtransaction(signed["hex"])
-        txids.append(txid)
+    for index, step in enumerate(plan.steps, start=1):
+        rpc_inputs = _resolve_chained_inputs(step.inputs, previous_change_ref)
+        ordered_outputs: "OrderedDict[str, float]" = OrderedDict()
+        for output in step.outputs:
+            ordered_outputs[output.address] = float(output.amount)
+        change_index: int | None = None
         if step.change_output is not None:
-            previous_change_ref = (txid, len(step.outputs))
+            change_index = len(ordered_outputs)
+            ordered_outputs[step.change_output.address] = float(step.change_output.amount)
+        payload = op_returns[index - 1] if op_returns is not None else None
+        payload_list = [payload] if payload else None
+        txid = tx_builder.send_payment_tx(
+            ordered_outputs,
+            float(step.fee),
+            op_return_data=payload_list,
+            inputs=rpc_inputs,
+        )
+        txids.append(txid)
+        if progress_callback is not None:
+            progress_callback(f"Tx{index}: broadcast {txid}")
+        if change_index is not None:
+            previous_change_ref = (txid, change_index)
         else:
             previous_change_ref = None
+        is_last_step = index == len(plan.steps)
+        if not is_last_step:
+            if previous_change_ref is None:
+                raise PlanningError("Chained plan ended before downstream steps could be funded")
+            if min_confirmations_between_steps > 0:
+                _wait_for_confirmations(
+                    rpc,
+                    txid,
+                    index,
+                    min_confirmations_between_steps,
+                    wait_between_txs,
+                    max_wait_seconds,
+                    progress_callback,
+                )
+            elif wait_between_txs > 0:
+                time.sleep(wait_between_txs)
     return txids
+
+
+def _resolve_chained_inputs(
+    inputs: Sequence[PatternInput], previous_change_ref: tuple[str, int] | None
+) -> list[Dict[str, Any]]:
+    rpc_inputs: list[Dict[str, Any]] = []
+    for entry in inputs:
+        if entry.txid == PREVIOUS_CHANGE_SENTINEL:
+            if previous_change_ref is None:
+                raise PlanningError(
+                    "Chained plan referenced previous change output before it was created"
+                )
+            rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+        else:
+            rpc_inputs.append({"txid": entry.txid, "vout": entry.vout})
+    return rpc_inputs
+
+
+def _wait_for_confirmations(
+    rpc: DigiByteRPC,
+    txid: str,
+    tx_index: int,
+    required_confirmations: int,
+    wait_between_txs: float,
+    max_wait_seconds: float | None,
+    progress_callback: ProgressCallback | None,
+) -> None:
+    poll_interval = wait_between_txs if wait_between_txs > 0 else 5.0
+    waited = 0.0
+    while True:
+        confirmations = _query_confirmations(rpc, txid)
+        if confirmations >= required_confirmations:
+            if progress_callback is not None:
+                progress_callback(
+                    f"Tx{tx_index}: reached {confirmations} confirmations "
+                    f"(required {required_confirmations})"
+                )
+            return
+        if progress_callback is not None:
+            progress_callback(
+                f"Tx{tx_index}: waiting for {required_confirmations} confirmations "
+                f"(current: {confirmations})"
+            )
+        if max_wait_seconds is not None and waited >= max_wait_seconds:
+            raise PlanningError(
+                f"Tx{tx_index} did not reach {required_confirmations} confirmations "
+                f"within {max_wait_seconds} seconds"
+            )
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+
+def _query_confirmations(rpc: DigiByteRPC, txid: str) -> int:
+    try:
+        info = rpc.gettransaction(txid)
+    except Exception:  # pragma: no cover - defensive against transient RPC failures
+        return 0
+    confirmations = info.get("confirmations")
+    try:
+        return int(confirmations)
+    except (TypeError, ValueError):  # pragma: no cover - defensive parsing
+        return 0
 
 
 def _select_utxos_covering_total(
