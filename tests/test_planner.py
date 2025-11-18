@@ -9,6 +9,8 @@ from enigmatic_dgb.planner import (
     AutomationMetadata,
     AutomationSymbol,
     PatternPlan,
+    PatternPlanSequence,
+    PREVIOUS_CHANGE_SENTINEL,
     PlanningError,
     SymbolPlan,
     SymbolPlanner,
@@ -21,6 +23,9 @@ class DummyRPC:
     def __init__(self) -> None:
         self._change_index = 0
         self.last_tx = None
+        self.tx_history: list[tuple[list, list]] = []
+        self._tx_index = 0
+        self.sent_txids: list[str] = []
 
     def getblockcount(self) -> int:
         return 100
@@ -42,6 +47,7 @@ class DummyRPC:
 
     def createrawtransaction(self, inputs, outputs):
         self.last_tx = (inputs, outputs)
+        self.tx_history.append((inputs, outputs))
         return "rawtx"
 
     def signrawtransactionwithwallet(self, raw_hex):
@@ -50,7 +56,10 @@ class DummyRPC:
 
     def sendrawtransaction(self, signed_hex):
         assert signed_hex == "signed"
-        return "broadcast-txid"
+        txid = f"broadcast-txid-{self._tx_index}"
+        self._tx_index += 1
+        self.sent_txids.append(txid)
+        return txid
 
 
 @pytest.fixture()
@@ -94,7 +103,7 @@ def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: Automa
     planner = SymbolPlanner(rpc, automation)
     plan = planner.plan(symbol)
     txid = planner.broadcast(plan)
-    assert txid == "broadcast-txid"
+    assert txid == "broadcast-txid-0"
     inputs, outputs = rpc.last_tx
     assert len(inputs) == symbol.inputs
     assert len(outputs) == symbol.outputs
@@ -152,10 +161,13 @@ def test_plan_explicit_pattern_builds_outputs() -> None:
         amounts=[Decimal("1.0"), Decimal("2.0"), Decimal("3.0")],
         fee=Decimal("0.1"),
     )
-    assert isinstance(plan, PatternPlan)
-    assert len(plan.outputs) == 3
-    assert plan.outputs[0].amount == Decimal("1.00000000")
-    assert plan.change_output is not None
+    assert isinstance(plan, PatternPlanSequence)
+    assert len(plan.steps) == 3
+    first = plan.steps[0]
+    assert first.outputs[0].amount == Decimal("1.00000000")
+    assert first.change_output is not None
+    second = plan.steps[1]
+    assert second.inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
 
 
 def test_broadcast_pattern_plan_uses_same_stack() -> None:
@@ -163,11 +175,30 @@ def test_broadcast_pattern_plan_uses_same_stack() -> None:
     plan = plan_explicit_pattern(
         rpc,
         to_address="dgb1target",
-        amounts=[Decimal("1.0")],
+        amounts=[Decimal("1.0"), Decimal("0.5")],
         fee=Decimal("0.1"),
     )
-    txid = broadcast_pattern_plan(rpc, plan)
-    assert txid == "broadcast-txid"
-    inputs, outputs = rpc.last_tx
-    assert len(inputs) == len(plan.inputs)
-    assert len(outputs) >= len(plan.outputs)
+    txids = broadcast_pattern_plan(rpc, plan)
+    assert txids == ["broadcast-txid-0", "broadcast-txid-1"]
+    assert len(rpc.tx_history) == 2
+    first_inputs, _ = rpc.tx_history[0]
+    second_inputs, _ = rpc.tx_history[1]
+    assert len(first_inputs) == len(plan.steps[0].inputs)
+    assert second_inputs[0]["txid"] == txids[0]
+
+
+def test_plan_explicit_pattern_rejects_dust_chain() -> None:
+    class TinyUTXORPC(DummyRPC):
+        def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
+            return [
+                {"txid": "tiny1", "vout": 0, "amount": "0.0003", "spendable": True},
+            ]
+
+    rpc = TinyUTXORPC()
+    with pytest.raises(PlanningError):
+        plan_explicit_pattern(
+            rpc,
+            to_address="dgb1target",
+            amounts=[Decimal("0.0002"), Decimal("0.00002")],
+            fee=Decimal("0.00001"),
+        )

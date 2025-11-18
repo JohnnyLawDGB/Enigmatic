@@ -429,8 +429,8 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     )
     print(json.dumps(plan.to_jsonable(), indent=2))
     if args.broadcast:
-        txid = broadcast_pattern_plan(rpc, plan)
-        print(json.dumps({"txid": txid}, separators=COMPACT_JSON_SEPARATORS))
+        txids = broadcast_pattern_plan(rpc, plan)
+        print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
 def main(argv: Sequence[str] | None = None) -> None:

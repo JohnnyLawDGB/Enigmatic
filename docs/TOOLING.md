@@ -132,10 +132,13 @@ enigmatic-dgb plan-pattern \
 ```
 
 Both commands print the selected UTXOs, ordered outputs, change split, and fee.
-Re-run with `--broadcast` once the plan looks correct. Planner-specific RPC
-flags (`--rpc-host`, `--rpc-port`, `--rpc-wallet`, etc.) temporarily override
-both environment defaults and dialect hints, which is useful when you stage a
-dialect on testnet or an air-gapped node.
+`plan-pattern` now produces a chained plan (one transaction per amount) so that
+duplicate outputs to the same address never trigger DigiByte Core's
+"duplicated address" RPC errors. The `--fee` argument applies per transaction,
+and the broadcast path returns every transaction ID in relay order. Planner-
+specific RPC flags (`--rpc-host`, `--rpc-port`, `--rpc-wallet`, etc.)
+temporarily override both environment defaults and dialect hints, which is
+useful when you stage a dialect on testnet or an air-gapped node.
 
 ## 9. Running tests and linting
 
