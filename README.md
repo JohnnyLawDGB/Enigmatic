@@ -187,8 +187,14 @@ enigmatic-dgb plan-pattern \
   --broadcast
 ```
 
-Each dry run prints the selected inputs, ordered outputs, fee, and change so
-you can audit the transaction before flipping the broadcast flag.
+Because DigiByte Core forbids duplicate outputs to the same address within a
+single JSON object, the planner automatically creates a chained plan where each
+amount is sent in its own transaction. The `--fee` flag applies per
+transaction, so the total cost is the sum of all amounts plus `fee × steps`. Each
+dry run prints the selected inputs, ordered outputs, fee, and change for every
+step so you can audit the chain before flipping the broadcast flag. When
+`--broadcast` is supplied, the CLI returns the list of transaction IDs in the
+order they were relayed.
 
 ## Documentation & Spec Map
 

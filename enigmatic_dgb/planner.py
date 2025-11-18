@@ -15,6 +15,7 @@ getcontext().prec = 16
 
 DUST_LIMIT = Decimal("0.00010000")
 EIGHT_DP = Decimal("0.00000001")
+PREVIOUS_CHANGE_SENTINEL = "__PREVIOUS_CHANGE__"
 
 
 class PlanningError(RuntimeError):
@@ -166,6 +167,14 @@ class PatternPlan:
         }
 
 
+@dataclass
+class PatternPlanSequence:
+    steps: List[PatternPlan]
+
+    def to_jsonable(self) -> Dict[str, Any]:
+        return {"steps": [step.to_jsonable() for step in self.steps]}
+
+
 class SymbolPlanner:
     def __init__(self, rpc: DigiByteRPC, automation: AutomationMetadata) -> None:
         self.rpc = rpc
@@ -265,7 +274,7 @@ def plan_explicit_pattern(
     amounts: Sequence[Decimal],
     fee: Decimal,
     min_confirmations: int = 1,
-) -> PatternPlan:
+) -> PatternPlanSequence:
     if not amounts:
         raise PlanningError("At least one output amount must be provided")
     normalized_amounts: list[Decimal] = []
@@ -280,7 +289,7 @@ def plan_explicit_pattern(
         raise PlanningError("Total output amount must be greater than zero")
     if fee < 0:
         raise PlanningError("Fee must be non-negative")
-    required_total = total_pattern + fee
+    required_total = total_pattern + (fee * len(normalized_amounts))
     utxos = rpc.listunspent(min_confirmations)
     selected, total = _select_utxos_covering_total(utxos, required_total)
     pattern_inputs = [
@@ -291,31 +300,87 @@ def plan_explicit_pattern(
         )
         for entry in selected
     ]
-    pattern_outputs = [
-        PatternOutput(address=to_address, amount=amount)
-        for amount in normalized_amounts
-    ]
-    change_amount = (total - required_total).quantize(EIGHT_DP, rounding=ROUND_DOWN)
-    change_output: PatternOutput | None = None
-    if change_amount >= DUST_LIMIT:
-        change_address = rpc.getrawchangeaddress()
-        change_output = PatternOutput(address=change_address, amount=change_amount)
-    elif change_amount > 0 and pattern_outputs:
-        last = pattern_outputs[-1]
-        pattern_outputs[-1] = PatternOutput(
-            address=last.address,
-            amount=(last.amount + change_amount).quantize(EIGHT_DP, rounding=ROUND_DOWN),
+    available_pool = total
+    pending_change_amount: Decimal | None = None
+    steps: list[PatternPlan] = []
+    for index, amount in enumerate(normalized_amounts):
+        if index == 0:
+            step_inputs = pattern_inputs
+        else:
+            if pending_change_amount is None:
+                raise PlanningError("Chained plan expected change from previous step")
+            if pending_change_amount < DUST_LIMIT:
+                raise PlanningError(
+                    "Intermediate chained change would fall below dust limit; adjust fee or amounts"
+                )
+            available_pool = pending_change_amount
+            step_inputs = [
+                PatternInput(
+                    txid=PREVIOUS_CHANGE_SENTINEL,
+                    vout=0,
+                    amount=pending_change_amount,
+                )
+            ]
+        if available_pool < amount + fee:
+            raise PlanningError("Insufficient funds for requested pattern amounts and fees")
+        change_amount = (available_pool - amount - fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+        step_outputs = [PatternOutput(address=to_address, amount=amount)]
+        change_output: PatternOutput | None = None
+        is_last = index == len(normalized_amounts) - 1
+        if change_amount > 0:
+            if change_amount < DUST_LIMIT and not is_last:
+                raise PlanningError(
+                    "Intermediate chained change would fall below dust limit; adjust fee or amounts"
+                )
+            if change_amount >= DUST_LIMIT:
+                change_address = rpc.getrawchangeaddress()
+                change_output = PatternOutput(address=change_address, amount=change_amount)
+            else:
+                step_outputs[-1] = PatternOutput(
+                    address=step_outputs[-1].address,
+                    amount=(step_outputs[-1].amount + change_amount).quantize(
+                        EIGHT_DP, rounding=ROUND_DOWN
+                    ),
+                )
+                change_amount = Decimal("0")
+        steps.append(
+            PatternPlan(
+                inputs=step_inputs,
+                outputs=step_outputs,
+                change_output=change_output,
+                fee=fee,
+            )
         )
-        change_amount = Decimal("0")
-    return PatternPlan(inputs=pattern_inputs, outputs=pattern_outputs, change_output=change_output, fee=fee)
+        pending_change_amount = change_amount
+    return PatternPlanSequence(steps=steps)
 
 
-def broadcast_pattern_plan(rpc: DigiByteRPC, plan: PatternPlan) -> str:
-    raw_hex = rpc.createrawtransaction(plan.as_rpc_inputs(), plan.as_rpc_outputs())
-    signed = rpc.signrawtransactionwithwallet(raw_hex)
-    if not signed.get("complete"):
-        raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
-    return rpc.sendrawtransaction(signed["hex"])
+def broadcast_pattern_plan(rpc: DigiByteRPC, plan: PatternPlanSequence) -> list[str]:
+    txids: list[str] = []
+    previous_change_ref: tuple[str, int] | None = None
+    for step in plan.steps:
+        rpc_inputs: list[Dict[str, Any]] = []
+        for entry in step.inputs:
+            if entry.txid == PREVIOUS_CHANGE_SENTINEL:
+                if previous_change_ref is None:
+                    raise PlanningError(
+                        "Chained plan referenced previous change output before it was created"
+                    )
+                rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+            else:
+                rpc_inputs.append({"txid": entry.txid, "vout": entry.vout})
+        outputs = step.as_rpc_outputs()
+        raw_hex = rpc.createrawtransaction(rpc_inputs, outputs)
+        signed = rpc.signrawtransactionwithwallet(raw_hex)
+        if not signed.get("complete"):
+            raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
+        txid = rpc.sendrawtransaction(signed["hex"])
+        txids.append(txid)
+        if step.change_output is not None:
+            previous_change_ref = (txid, len(step.outputs))
+        else:
+            previous_change_ref = None
+    return txids
 
 
 def _select_utxos_covering_total(
