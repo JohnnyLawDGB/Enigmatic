@@ -98,7 +98,11 @@ def test_send_symbol_uses_transaction_builder(monkeypatch: pytest.MonkeyPatch) -
             captured["rpc"] = rpc
 
         def send_payment_tx(
-            self, outputs: dict[str, float], fee: float, op_return_data: list[str] | None = None
+            self,
+            outputs: dict[str, float],
+            fee: float,
+            op_return_data: list[str] | None = None,
+            script_plane=None,
         ) -> str:
             captured["outputs"] = outputs
             captured["fee"] = fee

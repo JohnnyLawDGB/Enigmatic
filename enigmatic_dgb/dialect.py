@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from .script_plane import ScriptPlane, parse_script_plane_block
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +34,7 @@ class DialectSymbol:
     micros: list[float]
     intent: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    script_plane: ScriptPlane | None = None
     dialect_name: str | None = None
     requires_session: bool = False
     session_scope: str | None = None
@@ -99,6 +102,13 @@ def load_dialect(path: str | Path) -> Dialect:
         metadata = payload.get("metadata") or {}
         if not isinstance(metadata, dict):
             raise DialectError(f"Symbol {symbol_name} metadata must be a mapping")
+        script_plane_block = payload.get("script_plane")
+        script_plane: ScriptPlane | None = None
+        if script_plane_block is not None:
+            script_plane = parse_script_plane_block(
+                script_plane_block,
+                lambda msg: DialectError(f"Symbol {symbol_name}: {msg}"),
+            )
         requires_session = bool(payload.get("requires_session", False))
         session_scope = payload.get("session_scope")
         if session_scope is not None and not isinstance(session_scope, str):
@@ -114,6 +124,7 @@ def load_dialect(path: str | Path) -> Dialect:
             micros=micros,
             intent=intent,
             metadata=dict(metadata),
+            script_plane=script_plane,
             dialect_name=name,
             requires_session=requires_session,
             session_scope=session_scope,

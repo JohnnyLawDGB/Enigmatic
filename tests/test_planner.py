@@ -19,6 +19,7 @@ from enigmatic_dgb.planner import (
     broadcast_pattern_plan,
     plan_explicit_pattern,
 )
+from enigmatic_dgb.script_plane import ScriptPlane
 
 
 class DummyRPC:
@@ -39,7 +40,7 @@ class DummyRPC:
             {"txid": "c", "vout": 2, "amount": "2.0", "spendable": True},
         ]
 
-    def getnewaddress(self) -> str:
+    def getnewaddress(self, label=None, address_type=None) -> str:
         return "dgb1receiver"
 
     def getrawchangeaddress(self) -> str:
@@ -74,9 +75,10 @@ class StubBuilder:
         fee: float,
         op_return_data: list[str] | None = None,
         inputs: list[dict[str, int]] | None = None,
+        script_plane=None,
     ) -> str:
         prepared_inputs = list(inputs or [])
-        self.calls.append((prepared_inputs, dict(outputs), op_return_data, fee))
+        self.calls.append((prepared_inputs, dict(outputs), op_return_data, fee, script_plane))
         return f"stub-tx-{len(self.calls)}"
 
 
@@ -114,6 +116,33 @@ def test_symbol_planner_plan_distribution(automation: AutomationMetadata, symbol
     receiver_amount = plan.outputs["dgb1receiver"]
     assert receiver_amount >= symbol.value
     assert plan.block_target == 103
+
+
+def test_symbol_plan_includes_script_plane(automation: AutomationMetadata) -> None:
+    class TaprootRPC(DummyRPC):
+        def __init__(self) -> None:
+            super().__init__()
+            self.address_types: list[str | None] = []
+
+        def getnewaddress(self, label=None, address_type=None) -> str:  # type: ignore[override]
+            self.address_types.append(address_type)
+            return super().getnewaddress(label, address_type)
+
+    rpc = TaprootRPC()
+    tap_symbol = AutomationSymbol(
+        name="TAP",
+        value=Decimal("2.0"),
+        fee=Decimal("0.2"),
+        inputs=1,
+        outputs=1,
+        delta=0,
+        sigma=0,
+        script_plane=ScriptPlane(script_type="p2tr", taproot_mode="script_path", branch_id=4),
+    )
+    planner = SymbolPlanner(rpc, automation)
+    plan = planner.plan(tap_symbol)
+    assert plan.script_plane == tap_symbol.script_plane
+    assert rpc.address_types and rpc.address_types[0] == "bech32m"
 
 
 def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
@@ -154,6 +183,10 @@ symbols:
       fee: 0.1
       m: 1
       n: 1
+      script_plane:
+        script_type: p2tr
+        taproot_mode: script_path
+        branch_id: 9
 automation:
   rpc:
     endpoint: http://127.0.0.1:14022
@@ -161,7 +194,10 @@ automation:
     path = tmp_path / "dialect.yaml"
     path.write_text(content)
     dialect = AutomationDialect.load(path)
-    assert dialect.get_symbol("TEST").value == Decimal("1.5")
+    symbol = dialect.get_symbol("TEST")
+    assert symbol.value == Decimal("1.5")
+    assert symbol.script_plane is not None
+    assert symbol.script_plane.branch_id == 9
 
 
 def test_load_missing_symbol_section(tmp_path) -> None:

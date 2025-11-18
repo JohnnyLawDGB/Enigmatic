@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, List
 
 from .model import EncodingConfig, EnigmaticMessage
+from .script_plane import ScriptPlane
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class ObservedTx:
     amount: float
     fee: float | None = None
     op_return_data: bytes | None = None
+    script_plane: ScriptPlane | None = None
 
 
 def group_into_packets(txs: List[ObservedTx], config: EncodingConfig) -> List[List[ObservedTx]]:
@@ -66,6 +68,9 @@ class EnigmaticDecoder:
         payload = self._payload_from_micros(micros)
         if fee_punct:
             payload["punctuation"] = True
+        script_planes = [tx.script_plane.to_dict() for tx in packet if tx.script_plane]
+        if script_planes:
+            payload["script_plane"] = script_planes[0] if len(script_planes) == 1 else script_planes
 
         op_return_hints = self._op_return_metadata(packet)
         if op_return_hints:

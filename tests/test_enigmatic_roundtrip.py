@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from enigmatic_dgb.decoder import EnigmaticDecoder, ObservedTx, group_into_packets
 from enigmatic_dgb.encoder import EnigmaticEncoder
 from enigmatic_dgb.model import EncodingConfig, EnigmaticMessage
+from enigmatic_dgb.script_plane import ScriptPlane
 
 
 def test_identity_round_trip() -> None:
@@ -90,3 +91,16 @@ def test_decoder_includes_op_return_hint() -> None:
     message = decoder.decode_packet(packet, channel="default")
 
     assert message.payload["op_return"]["hint"] == "demo"
+
+
+def test_decoder_emits_script_plane_metadata() -> None:
+    config = EncodingConfig.enigmatic_default()
+    decoder = EnigmaticDecoder(config)
+    plane = ScriptPlane(script_type="p2tr", taproot_mode="script_path", branch_id=11)
+    packet = [
+        ObservedTx(
+            txid="tp", timestamp=datetime.utcnow(), amount=config.anchor_amounts[0], script_plane=plane
+        )
+    ]
+    message = decoder.decode_packet(packet, channel="default")
+    assert message.payload["script_plane"]["branch_id"] == 11

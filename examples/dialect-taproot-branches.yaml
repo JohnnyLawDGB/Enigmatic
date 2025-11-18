@@ -1,0 +1,47 @@
+name: Taproot Branch Demo
+version: 0.1.0
+symbols:
+  - name: TAP_BRANCH_FAST
+    match:
+      value: 2.10000000
+      fee: 0.05000000
+      m: 1
+      n: 2
+      delta: 1
+      sigma: 0
+      script_plane:
+        script_type: p2tr
+        taproot_mode: script_path
+        branch_id: 3
+  - name: TAP_BRANCH_MEDIUM
+    match:
+      value: 3.30000000
+      fee: 0.05000000
+      m: 2
+      n: 2
+      delta: 2
+      sigma: 1
+      script_plane:
+        script_type: p2tr
+        taproot_mode: script_path
+        branch_id: 7
+  - name: TAP_BRANCH_SLOW
+    match:
+      value: 4.40000000
+      fee: 0.06000000
+      m: 2
+      n: 3
+      delta: 3
+      sigma: -1
+      script_plane:
+        script_type: p2tr
+        taproot_mode: script_path
+        branch_id: 11
+automation:
+  rpc:
+    endpoint: http://127.0.0.1:14022
+    wallet: enigmatic-taproot
+    min_confirmations: 1
+  scheduling:
+    max_drift_blocks: 2
+    rebroadcast_misses: 2

@@ -208,8 +208,17 @@ class DigiByteRPC:
             params.append(addresses)
         return self.call("listunspent", params)
 
-    def getnewaddress(self) -> str:
-        return self.call("getnewaddress")
+    def getnewaddress(
+        self, label: str | None = None, address_type: str | None = None
+    ) -> str:
+        params: list[Any] = []
+        if label is not None:
+            params.append(label)
+        elif address_type is not None:
+            params.append("")
+        if address_type is not None:
+            params.append(address_type)
+        return self.call("getnewaddress", params)
 
     def getrawchangeaddress(self) -> str:
         return self.call("getrawchangeaddress")
