@@ -122,6 +122,33 @@ configuration, and exercising each CLI subcommand, read
 Rendered whitepaper PDFs live next to the Markdown originals inside `docs/`
 when reviewers need to diff layout.
 
+### Reference stack components
+
+The Python package exposed via `enigmatic_dgb/` keeps the protocol concepts,
+planner, and automation workflows synchronized. The most-referenced modules are:
+
+- [`cli.py`](enigmatic_dgb/cli.py) – Entry point for `enigmatic-dgb` commands
+  (`plan-symbol`, `send-sequence`, `plan-chain`, etc.). The CLI wires RPC
+  credentials, planner options, encryption/session settings, and TxBuilder
+  behavior through a single surface area.
+- [`planner.py`](enigmatic_dgb/planner.py) – Converts value/fee/cardinality
+  constraints from a dialect or ad-hoc request into spendable UTXO sets and
+  change choreography. Planner outputs are reused by dry runs and broadcasts so
+  auditors can diff expectations vs. relayed state vectors.
+- [`tx_builder.py`](enigmatic_dgb/tx_builder.py) – Crafts DigiByte transactions
+  that honor dust rules, optional OP_RETURN hints, and deterministic change
+  placement before relaying via RPC.
+- [`rpc_client.py`](enigmatic_dgb/rpc_client.py) – Thin wrapper over
+  `getrawtransaction`, `listunspent`, and broadcast primitives so tests and the
+  CLI share a common interface.
+- [`watcher.py`](enigmatic_dgb/watcher.py) – Ledger observer used in examples to
+  decode chains and prove that telemetry style encodings round-trip through the
+  decoder.
+
+`docs/ARCHITECTURE.md` and `examples/README.md` expand on how those modules work
+together for multi-frame automation, while `tests/` exercises the encoder,
+decoder, and planner invariants.
+
 ---
 
 ## RPC Heartbeat Helper
