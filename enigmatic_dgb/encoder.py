@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+import hashlib
+import json
+from typing import Any, Iterable, Tuple
 from uuid import uuid4
 
 from .dialect import DialectSymbol
@@ -23,11 +26,33 @@ logger = logging.getLogger(__name__)
 class SpendInstruction:
     """Represents a single payment pattern element."""
 
-    to_address: str
+    to_address: str | None
     amount: float
     is_anchor: bool
     is_micro: bool
     role: str
+    op_return_data: bytes | None = None
+
+    @property
+    def is_op_return(self) -> bool:
+        return self.op_return_data is not None
+
+
+def aggregate_spend_instructions(
+    instructions: Iterable["SpendInstruction"],
+) -> Tuple[dict[str, float], list[bytes]]:
+    """Group spend instructions by address and collect OP_RETURN payloads."""
+
+    outputs: dict[str, float] = defaultdict(float)
+    op_returns: list[bytes] = []
+    for instruction in instructions:
+        if instruction.op_return_data:
+            op_returns.append(instruction.op_return_data)
+            continue
+        if not instruction.to_address:
+            raise ValueError("Spend instruction is missing a destination address")
+        outputs[instruction.to_address] += instruction.amount
+    return dict(outputs), op_returns
 
 
 class EnigmaticEncoder:
@@ -88,6 +113,19 @@ class EnigmaticEncoder:
                 )
             )
 
+        op_return_hint = self._build_op_return_hint(message, payload_for_encoding)
+        if op_return_hint:
+            instructions.append(
+                SpendInstruction(
+                    to_address=None,
+                    amount=0.0,
+                    is_anchor=False,
+                    is_micro=False,
+                    role="op_return",
+                    op_return_data=op_return_hint,
+                )
+            )
+
         logger.debug(
             "Encoded message %s into %d instructions", message.id or str(uuid4()), len(instructions)
         )
@@ -117,6 +155,8 @@ class EnigmaticEncoder:
         payload.update(symbol.metadata)
         if extra_payload:
             payload.update(extra_payload)
+
+        payload_for_hint = dict(payload)
 
         message = EnigmaticMessage(
             id=str(uuid4()),
@@ -152,6 +192,19 @@ class EnigmaticEncoder:
                     is_anchor=False,
                     is_micro=True,
                     role=f"symbol_micro_{idx}",
+                )
+            )
+
+        op_return_hint = self._build_op_return_hint(message, payload_for_hint)
+        if op_return_hint:
+            instructions.append(
+                SpendInstruction(
+                    to_address=None,
+                    amount=0.0,
+                    is_anchor=False,
+                    is_micro=False,
+                    role="op_return",
+                    op_return_data=op_return_hint,
                 )
             )
         logger.debug(
@@ -191,3 +244,33 @@ class EnigmaticEncoder:
             elif value:
                 micros.append(micro_values[idx])
         return micros
+
+    def _build_op_return_hint(
+        self, message: EnigmaticMessage, payload: dict[str, Any]
+    ) -> bytes | None:
+        """Serialize a compact hint for the optional OP_RETURN plane."""
+
+        hint: dict[str, Any] = {
+            "id": message.id,
+            "intent": message.intent,
+            "channel": message.channel,
+        }
+        if payload:
+            try:
+                serialized_payload = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                serialized_payload = b""
+            if serialized_payload:
+                digest = hashlib.sha256(serialized_payload).hexdigest()[:16]
+                hint["payload_hash"] = digest
+
+        for keys_to_drop in (set(), {"channel"}, {"payload_hash"}, {"channel", "payload_hash"}):
+            candidate = {k: v for k, v in hint.items() if k not in keys_to_drop}
+            encoded = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+            if len(encoded) <= 80:
+                return encoded
+        return None

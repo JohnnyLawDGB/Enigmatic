@@ -21,8 +21,8 @@ def stub_transaction_builder(monkeypatch):
         def __init__(self, rpc):
             self.rpc = rpc
 
-        def send_payment_tx(self, outputs, fee):
-            DummyBuilder.last_call = (outputs, fee)
+        def send_payment_tx(self, outputs, fee, op_return_data=None):
+            DummyBuilder.last_call = (outputs, fee, op_return_data)
             return "tx-dummy"
 
     monkeypatch.setattr(symbol_sender_module, "TransactionBuilder", DummyBuilder)

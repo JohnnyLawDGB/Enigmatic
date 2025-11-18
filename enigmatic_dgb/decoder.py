@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, List
 
 from .model import EncodingConfig, EnigmaticMessage
 
@@ -19,6 +20,7 @@ class ObservedTx:
     timestamp: datetime
     amount: float
     fee: float | None = None
+    op_return_data: bytes | None = None
 
 
 def group_into_packets(txs: List[ObservedTx], config: EncodingConfig) -> List[List[ObservedTx]]:
@@ -65,6 +67,10 @@ class EnigmaticDecoder:
         if fee_punct:
             payload["punctuation"] = True
 
+        op_return_hints = self._op_return_metadata(packet)
+        if op_return_hints:
+            payload["op_return"] = op_return_hints[0] if len(op_return_hints) == 1 else op_return_hints
+
         message = EnigmaticMessage(
             id=str(uuid.uuid4()),
             timestamp=min(tx.timestamp for tx in packet),
@@ -107,3 +113,20 @@ class EnigmaticDecoder:
 
     def _matches_micro(self, amount: float) -> bool:
         return any(abs(amount - micro) < 1e-8 for micro in self.config.micro_amounts)
+
+    def _op_return_metadata(self, packet: List[ObservedTx]) -> list[dict[str, Any]]:
+        hints: list[dict[str, Any]] = []
+        for tx in packet:
+            if not tx.op_return_data:
+                continue
+            try:
+                text = tx.op_return_data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict):
+                hints.append(decoded)
+        return hints

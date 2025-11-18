@@ -70,7 +70,9 @@ class TransactionBuilder:
         self.rpc = rpc
         self.utxo_manager = UTXOManager(rpc)
 
-    def build_payment_tx(self, outputs: Dict[str, float], fee: float) -> str:
+    def build_payment_tx(
+        self, outputs: Dict[str, float], fee: float, op_return_data: list[str] | None = None
+    ) -> str:
         """Create a signed raw transaction paying outputs with the provided fee."""
 
         logger.info("Building transaction for %d outputs", len(outputs))
@@ -81,9 +83,11 @@ class TransactionBuilder:
         raw_tx: str | None = None
 
         # Attempt to use fundrawtransaction first
+        prepared_outputs = self._prepare_outputs_payload(outputs, op_return_data)
+
         try:
             logger.debug("Attempting automatic funding via fundrawtransaction")
-            tmp_raw = self.rpc.createrawtransaction([], outputs)
+            tmp_raw = self.rpc.createrawtransaction([], prepared_outputs)
             fee_rate = self._estimate_fee_rate(fee)
             funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
             raw_tx = funded["hex"]
@@ -99,11 +103,13 @@ class TransactionBuilder:
             selected_utxos, change_amount = self.utxo_manager.select_utxos(total_output, fee)
             logger.debug("Selected %d UTXOs totaling %.8f DGB", len(selected_utxos), sum(u.amount for u in selected_utxos))
             tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
-            tx_outputs = dict(outputs)
             if change_amount > 1e-8:
                 change_address = self.rpc.getnewaddress()
-                tx_outputs[change_address] = round(change_amount, 8)
-            raw_tx = self.rpc.createrawtransaction(tx_inputs, tx_outputs)
+                outputs[change_address] = round(change_amount, 8)
+
+            manual_outputs = self._prepare_outputs_payload(outputs, op_return_data)
+
+            raw_tx = self.rpc.createrawtransaction(tx_inputs, manual_outputs)
 
         signed = self.rpc.signrawtransactionwithwallet(raw_tx)
         if not signed.get("complete"):
@@ -121,13 +127,26 @@ class TransactionBuilder:
                 )
         return signed_hex
 
-    def send_payment_tx(self, outputs: Dict[str, float], fee: float) -> str:
+    def send_payment_tx(
+        self, outputs: Dict[str, float], fee: float, op_return_data: list[str] | None = None
+    ) -> str:
         """Build and broadcast a payment transaction, returning the txid."""
 
-        raw_tx = self.build_payment_tx(outputs, fee)
+        raw_tx = self.build_payment_tx(outputs, fee, op_return_data=op_return_data)
         txid = self.rpc.sendrawtransaction(raw_tx)
         logger.info("Broadcasted transaction %s", txid)
         return txid
+
+    @staticmethod
+    def _prepare_outputs_payload(
+        outputs: Dict[str, float], op_return_data: list[str] | None
+    ) -> list[Dict[str, Any]] | Dict[str, float]:
+        if not op_return_data:
+            return dict(outputs)
+        payload: list[Dict[str, Any]] = [{addr: amount} for addr, amount in outputs.items()]
+        for data in op_return_data:
+            payload.append({"data": data})
+        return payload
 
     @staticmethod
     def _estimate_fee_rate(fee: float, assumed_vbytes: int = 250) -> float:

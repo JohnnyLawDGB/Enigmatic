@@ -69,9 +69,10 @@ def test_encode_symbol_builds_instructions() -> None:
     assert message.payload["symbol"] == "TEST"
     assert message.payload["dialect"] == "intel"
     assert message.payload["extra"] is True
-    assert len(instructions) == 3
+    assert len(instructions) == 4
     assert instructions[0].amount == pytest.approx(217.0)
     assert instructions[1].amount == pytest.approx(0.111)
+    assert any(instr.op_return_data for instr in instructions)
     assert fee == pytest.approx(0.33)
 
 
@@ -96,9 +97,12 @@ def test_send_symbol_uses_transaction_builder(monkeypatch: pytest.MonkeyPatch) -
         def __init__(self, rpc: Any) -> None:
             captured["rpc"] = rpc
 
-        def send_payment_tx(self, outputs: dict[str, float], fee: float) -> str:
+        def send_payment_tx(
+            self, outputs: dict[str, float], fee: float, op_return_data: list[str] | None = None
+        ) -> str:
             captured["outputs"] = outputs
             captured["fee"] = fee
+            captured["op_return_data"] = op_return_data
             return "txid123"
 
     monkeypatch.setattr("enigmatic_dgb.symbol_sender.TransactionBuilder", DummyBuilder)
@@ -117,3 +121,4 @@ def test_send_symbol_uses_transaction_builder(monkeypatch: pytest.MonkeyPatch) -
     assert txids == ["txid123"]
     assert captured["outputs"]["DTdest"] == pytest.approx(300.1)
     assert captured["fee"] == pytest.approx(0.5)
+    assert captured["op_return_data"]
