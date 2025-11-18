@@ -27,6 +27,7 @@ from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
     PlanningError,
+    PlannedChain,
     SymbolPlanner,
     broadcast_pattern_plan,
     plan_explicit_pattern,
@@ -148,6 +149,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Broadcast the plan after inspection",
     )
+    planner_parser.add_argument(
+        "--as-chain",
+        action="store_true",
+        help="Plan the symbol as a chained message using the dialect frames",
+    )
+    planner_parser.add_argument(
+        "--max-frames",
+        type=int,
+        help="Limit the number of frames when planning a chained symbol",
+    )
     planner_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
     planner_parser.add_argument("--rpc-host", help="Override RPC host")
     planner_parser.add_argument(
@@ -227,6 +238,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pattern_parser.set_defaults(rpc_use_https=None)
 
+    chain_parser = subparsers.add_parser(
+        "plan-chain",
+        help="Plan or broadcast a chained symbol using dialect frames",
+    )
+    chain_parser.add_argument(
+        "--dialect-path",
+        default="examples/dialect-heartbeat.yaml",
+        help="Path to the automation dialect YAML file",
+    )
+    chain_parser.add_argument(
+        "--symbol",
+        help="Symbol name (defaults to the first entry in the dialect)",
+    )
+    chain_parser.add_argument(
+        "--to-address",
+        required=True,
+        help="Destination address for the chained message",
+    )
+    chain_parser.add_argument(
+        "--max-frames",
+        type=int,
+        help="Limit the number of frames included in the chain",
+    )
+    chain_mode = chain_parser.add_mutually_exclusive_group()
+    chain_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Inspect the plan without broadcasting (default)",
+    )
+    chain_mode.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="Broadcast the chained plan after inspection",
+    )
+    chain_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    chain_parser.add_argument("--rpc-host", help="Override RPC host")
+    chain_parser.add_argument(
+        "--rpc-port", type=int, help="Override RPC port (default from dialect)"
+    )
+    chain_parser.add_argument("--rpc-user", help="Override RPC username")
+    chain_parser.add_argument("--rpc-password", help="Override RPC password")
+    chain_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    chain_https_group = chain_parser.add_mutually_exclusive_group()
+    chain_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    chain_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    chain_parser.set_defaults(rpc_use_https=None)
+
     return parser
 
 
@@ -259,6 +329,22 @@ def _parse_decimal(value: str, flag: str) -> Decimal:
         return Decimal(value)
     except InvalidOperation as exc:  # pragma: no cover - input validation
         raise CLIError(f"{flag} must be a valid decimal value") from exc
+
+
+def _parse_max_frames(value: int | None) -> int | None:
+    """Validate the --max-frames flag shared by the planning commands."""
+
+    if value is None:
+        return None
+    if value <= 0:
+        raise CLIError("--max-frames must be positive")
+    return value
+
+
+def _format_decimal(value: Decimal) -> str:
+    """Format Decimal values with fixed precision for human summaries."""
+
+    return f"{value:.8f}"
 
 
 def _chunk_instructions(
@@ -409,11 +495,19 @@ def cmd_plan_symbol(args: argparse.Namespace) -> None:
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
-    plan = planner.plan(symbol, receiver=args.receiver_address)
-    print(json.dumps(plan.to_jsonable(), indent=2))
-    if args.broadcast:
-        txid = planner.broadcast(plan)
-        print(json.dumps({"txid": txid}, separators=COMPACT_JSON_SEPARATORS))
+    max_frames = _parse_max_frames(args.max_frames)
+    if args.as_chain:
+        chain = planner.plan_chain(symbol, receiver=args.receiver_address, max_frames=max_frames)
+        print(json.dumps(chain.to_jsonable(), indent=2))
+        if args.broadcast:
+            txids = planner.broadcast_chain(chain)
+            print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+    else:
+        plan = planner.plan(symbol, receiver=args.receiver_address)
+        print(json.dumps(plan.to_jsonable(), indent=2))
+        if args.broadcast:
+            txid = planner.broadcast(plan)
+            print(json.dumps({"txid": txid}, separators=COMPACT_JSON_SEPARATORS))
 
 
 def cmd_plan_pattern(args: argparse.Namespace) -> None:
@@ -433,6 +527,37 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
         print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
+def cmd_plan_chain(args: argparse.Namespace) -> None:
+    """Plan or broadcast a chained symbol defined in an automation dialect."""
+
+    dialect = AutomationDialect.load(args.dialect_path)
+    rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
+    planner = SymbolPlanner(rpc, dialect.automation)
+    symbol = dialect.get_symbol(args.symbol)
+    max_frames = _parse_max_frames(args.max_frames)
+    chain = planner.plan_chain(symbol, receiver=args.to_address, max_frames=max_frames)
+    _print_chain_summary(chain)
+    print(json.dumps(chain.to_jsonable(), indent=2))
+    if args.broadcast:
+        txids = planner.broadcast_chain(chain)
+        print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+
+
+def _print_chain_summary(plan: PlannedChain) -> None:
+    """Emit a human-readable list of the transactions in a chained plan."""
+
+    for index, tx in enumerate(plan.transactions, start=1):
+        change_desc = (
+            f"change {_format_decimal(tx.change_output.amount)} → {tx.change_output.address}"
+            if tx.change_output is not None
+            else "no change output"
+        )
+        print(
+            f"Frame {index}: send {_format_decimal(tx.to_output.amount)} DGB to {plan.to_address} "
+            f"(fee {_format_decimal(tx.fee)} DGB); {change_desc}"
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -447,6 +572,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_plan_symbol(args)
         elif args.command == "plan-pattern":
             cmd_plan_pattern(args)
+        elif args.command == "plan-chain":
+            cmd_plan_chain(args)
         else:  # pragma: no cover - argparse enforces choices
             raise CLIError(f"Unknown command: {args.command}")
     except KeyboardInterrupt:  # pragma: no cover - interactive use

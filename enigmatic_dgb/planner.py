@@ -32,6 +32,18 @@ class AutomationMetadata:
 
 
 @dataclass
+class AutomationFrame:
+    """Describes a single frame within a chained symbolic message."""
+
+    value: Decimal
+    fee: Decimal | None = None
+    inputs: int | None = None
+    outputs: int | None = None
+    delta: int | None = None
+    sigma: int | None = None
+
+
+@dataclass
 class AutomationSymbol:
     name: str
     value: Decimal
@@ -40,6 +52,12 @@ class AutomationSymbol:
     outputs: int
     delta: int
     sigma: int
+    frames: list[AutomationFrame] | None = None
+
+    def chained_frames(self) -> list[AutomationFrame]:
+        """Return the frames that define a chained symbol, if any."""
+
+        return list(self.frames or [])
 
 
 @dataclass
@@ -78,6 +96,29 @@ class AutomationDialect:
             match = entry.get("match") or {}
             if not match:
                 raise PlanningError(f"Symbol {entry.get('name')} missing match section")
+            frames_cfg = match.get("frames")
+            frames: list[AutomationFrame] | None = None
+            if frames_cfg is not None:
+                if not isinstance(frames_cfg, list) or not frames_cfg:
+                    raise PlanningError(
+                        f"Symbol {entry.get('name')} frames must be a non-empty list"
+                    )
+                frames = []
+                for idx, frame_cfg in enumerate(frames_cfg):
+                    if "value" not in frame_cfg:
+                        raise PlanningError(
+                            f"Frame #{idx + 1} for symbol {entry.get('name')} missing value"
+                        )
+                    frames.append(
+                        AutomationFrame(
+                            value=Decimal(str(frame_cfg["value"])),
+                            fee=Decimal(str(frame_cfg["fee"])) if "fee" in frame_cfg else None,
+                            inputs=int(frame_cfg["m"]) if "m" in frame_cfg else None,
+                            outputs=int(frame_cfg["n"]) if "n" in frame_cfg else None,
+                            delta=int(frame_cfg["delta"]) if "delta" in frame_cfg else None,
+                            sigma=int(frame_cfg["sigma"]) if "sigma" in frame_cfg else None,
+                        )
+                    )
             symbol = AutomationSymbol(
                 name=str(entry["name"]),
                 value=Decimal(str(match["value"])),
@@ -86,6 +127,7 @@ class AutomationDialect:
                 outputs=int(match["n"]),
                 delta=int(match.get("delta", 0)),
                 sigma=int(match.get("sigma", 0)),
+                frames=frames,
             )
             symbols[symbol.name] = symbol
         if not symbols:
@@ -175,6 +217,50 @@ class PatternPlanSequence:
         return {"steps": [step.to_jsonable() for step in self.steps]}
 
 
+@dataclass
+class PlannedTx:
+    """Represents a single transaction inside a chained plan."""
+
+    inputs: List[PatternInput]
+    to_output: PatternOutput
+    change_output: PatternOutput | None
+    fee: Decimal
+
+    def as_rpc_inputs(self) -> List[Dict[str, Any]]:
+        return [{"txid": item.txid, "vout": item.vout} for item in self.inputs]
+
+    def as_rpc_outputs(self) -> List[Dict[str, float]]:
+        outputs = [{self.to_output.address: float(self.to_output.amount)}]
+        if self.change_output is not None:
+            outputs.append({self.change_output.address: float(self.change_output.amount)})
+        return outputs
+
+    def to_jsonable(self, index: int) -> Dict[str, Any]:
+        return {
+            "index": index,
+            "fee": str(self.fee),
+            "inputs": [item.to_jsonable() for item in self.inputs],
+            "to_output": self.to_output.to_jsonable(0),
+            "change": self.change_output.to_jsonable(1)
+            if self.change_output is not None
+            else None,
+        }
+
+
+@dataclass
+class PlannedChain:
+    """Ordered set of transactions that encode a chained symbolic message."""
+
+    to_address: str
+    transactions: List[PlannedTx]
+
+    def to_jsonable(self) -> Dict[str, Any]:
+        return {
+            "to_address": self.to_address,
+            "transactions": [tx.to_jsonable(index) for index, tx in enumerate(self.transactions)],
+        }
+
+
 class SymbolPlanner:
     def __init__(self, rpc: DigiByteRPC, automation: AutomationMetadata) -> None:
         self.rpc = rpc
@@ -209,6 +295,108 @@ class SymbolPlanner:
             block_target=block_target,
         )
 
+    def plan_chain(
+        self,
+        symbol: AutomationSymbol,
+        *,
+        receiver: str | None = None,
+        max_frames: int | None = None,
+    ) -> PlannedChain:
+        """Plan a chained representation of a symbol using its declared frames."""
+        frames = symbol.chained_frames()
+        if not frames:
+            raise PlanningError(f"Symbol {symbol.name} does not define chained frames")
+        if max_frames is not None:
+            frames = frames[:max_frames]
+        if not frames:
+            raise PlanningError("max_frames truncated the chain to zero frames")
+        to_address = receiver or self.rpc.getnewaddress()
+        normalized_frames: list[AutomationFrame] = []
+        for frame in frames:
+            normalized_frames.append(
+                AutomationFrame(
+                    value=frame.value.quantize(EIGHT_DP, rounding=ROUND_DOWN),
+                    fee=(frame.fee or symbol.fee).quantize(EIGHT_DP, rounding=ROUND_DOWN),
+                    inputs=frame.inputs,
+                    outputs=frame.outputs,
+                    delta=frame.delta,
+                    sigma=frame.sigma,
+                )
+            )
+        required_inputs = normalized_frames[0].inputs or symbol.inputs
+        if required_inputs <= 0:
+            raise PlanningError("Chained plan requires at least one input in the first frame")
+        total_required = sum(frame.value + frame.fee for frame in normalized_frames)
+        utxos = self.rpc.listunspent(self.automation.min_confirmations)
+        selected, total = self._select_utxos(utxos, required_inputs, total_required)
+        transactions: list[PlannedTx] = []
+        available_pool = total
+        previous_change_amount: Decimal | None = None
+        for index, frame in enumerate(normalized_frames):
+            fee = frame.fee
+            if fee < 0:
+                raise PlanningError("Fee must be non-negative for chained plans")
+            value = frame.value
+            if value <= 0:
+                raise PlanningError("Each chained frame must send a positive value")
+            remaining_required = sum(
+                next_frame.value + next_frame.fee for next_frame in normalized_frames[index + 1 :]
+            )
+            if index > 0 and frame.inputs not in (None, 1):
+                raise PlanningError("Only the first chained frame may specify multiple inputs")
+            if index == 0:
+                inputs = [
+                    PatternInput(
+                        txid=str(entry["txid"]),
+                        vout=int(entry["vout"]),
+                        amount=Decimal(str(entry["amount"])),
+                    )
+                    for entry in selected
+                ]
+            else:
+                if previous_change_amount is None:
+                    raise PlanningError("Previous change amount missing for chained frame")
+                inputs = [
+                    PatternInput(
+                        txid=PREVIOUS_CHANGE_SENTINEL,
+                        vout=1,
+                        amount=previous_change_amount,
+                    )
+                ]
+            if available_pool < value + fee:
+                raise PlanningError("Insufficient funds to satisfy chained plan")
+            change_amount = (available_pool - value - fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+            if index < len(normalized_frames) - 1 and change_amount < DUST_LIMIT:
+                raise PlanningError("Intermediate change would fall below dust limit")
+            if change_amount < remaining_required:
+                raise PlanningError("Change does not cover downstream frames; adjust fees or values")
+            to_output = PatternOutput(address=to_address, amount=value)
+            change_output: PatternOutput | None = None
+            if change_amount >= DUST_LIMIT:
+                change_address = self.rpc.getrawchangeaddress()
+                change_output = PatternOutput(address=change_address, amount=change_amount)
+                previous_change_amount = change_amount
+                available_pool = change_amount
+            else:
+                available_pool = change_amount
+                if change_amount > 0:
+                    to_output = PatternOutput(
+                        address=to_output.address,
+                        amount=(to_output.amount + change_amount).quantize(
+                            EIGHT_DP, rounding=ROUND_DOWN
+                        ),
+                    )
+                previous_change_amount = None
+            transactions.append(
+                PlannedTx(
+                    inputs=inputs,
+                    to_output=to_output,
+                    change_output=change_output,
+                    fee=fee,
+                )
+            )
+        return PlannedChain(to_address=to_address, transactions=transactions)
+
     def broadcast(self, plan: SymbolPlan) -> str:
         outputs_json = {addr: float(amount) for addr, amount in plan.outputs.items()}
         raw_hex = self.rpc.createrawtransaction(plan.inputs, outputs_json)
@@ -216,6 +404,34 @@ class SymbolPlanner:
         if not signed.get("complete"):
             raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
         return self.rpc.sendrawtransaction(signed["hex"])
+
+    def broadcast_chain(self, plan: PlannedChain) -> list[str]:
+        """Broadcast each transaction in a chained plan sequentially."""
+        txids: list[str] = []
+        previous_change_ref: tuple[str, int] | None = None
+        for tx in plan.transactions:
+            rpc_inputs: list[Dict[str, Any]] = []
+            for item in tx.inputs:
+                if item.txid == PREVIOUS_CHANGE_SENTINEL:
+                    if previous_change_ref is None:
+                        raise PlanningError(
+                            "Chained broadcast referenced a change output before it existed"
+                        )
+                    rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+                else:
+                    rpc_inputs.append({"txid": item.txid, "vout": item.vout})
+            outputs = tx.as_rpc_outputs()
+            raw_hex = self.rpc.createrawtransaction(rpc_inputs, outputs)
+            signed = self.rpc.signrawtransactionwithwallet(raw_hex)
+            if not signed.get("complete"):
+                raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
+            txid = self.rpc.sendrawtransaction(signed["hex"])
+            txids.append(txid)
+            if tx.change_output is not None:
+                previous_change_ref = (txid, 1)
+            else:
+                previous_change_ref = None
+        return txids
 
     def _select_utxos(
         self,
