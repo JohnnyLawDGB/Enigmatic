@@ -6,6 +6,7 @@ import pytest
 
 from enigmatic_dgb.planner import (
     AutomationDialect,
+    AutomationFrame,
     AutomationMetadata,
     AutomationSymbol,
     PatternPlan,
@@ -202,3 +203,46 @@ def test_plan_explicit_pattern_rejects_dust_chain() -> None:
             amounts=[Decimal("0.0002"), Decimal("0.00002")],
             fee=Decimal("0.00001"),
         )
+
+
+def test_symbol_planner_chain_links_change(automation: AutomationMetadata) -> None:
+    class ChainRPC(DummyRPC):
+        def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
+            return [
+                {"txid": "aa", "vout": 0, "amount": "6.0", "spendable": True},
+                {"txid": "bb", "vout": 1, "amount": "5.0", "spendable": True},
+            ]
+
+    rpc = ChainRPC()
+    frames = [
+        AutomationFrame(value=Decimal("2"), fee=Decimal("0.1"), inputs=2, outputs=2, delta=0, sigma=0),
+        AutomationFrame(value=Decimal("3"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+        AutomationFrame(value=Decimal("5"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+    ]
+    symbol = AutomationSymbol(
+        name="PRIME_CHAIN",
+        value=Decimal("2"),
+        fee=Decimal("0.1"),
+        inputs=2,
+        outputs=2,
+        delta=0,
+        sigma=0,
+        frames=frames,
+    )
+    planner = SymbolPlanner(rpc, automation)
+    chain = planner.plan_chain(symbol, receiver="dgb1target")
+    assert len(chain.transactions) == 3
+    assert [tx.to_output.amount for tx in chain.transactions] == [
+        Decimal("2.00000000"),
+        Decimal("3.00000000"),
+        Decimal("5.00000000"),
+    ]
+    for tx in chain.transactions:
+        assert tx.to_output.address == "dgb1target"
+        assert tx.change_output is None or tx.change_output.address != "dgb1target"
+    for idx in range(2):
+        next_inputs = chain.transactions[idx + 1].inputs
+        assert len(next_inputs) == 1
+        assert next_inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
+        assert next_inputs[0].vout == 1
+        assert chain.transactions[idx].change_output is not None

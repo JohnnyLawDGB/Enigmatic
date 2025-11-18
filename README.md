@@ -163,6 +163,33 @@ Ensure your node has the target wallet loaded and unlocked before
 invocation. For end-to-end validation scenarios see
 [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md).
 
+### Chained Messages
+
+Some symbols now describe a sequence of frames that must be sent as a chained
+set of transactions to the same destination address. The CLI exposes two ways
+to plan and audit those envelopes:
+
+```bash
+# Inspect the frames declared in the dialect but stop before broadcast.
+enigmatic-dgb plan-chain \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT_CHAIN \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --max-frames 3 --dry-run
+
+# Use the legacy helper but force it to emit a chained plan.
+enigmatic-dgb plan-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT_CHAIN \
+  --as-chain --max-frames 3
+```
+
+Both flows reuse the same planner abstraction so the change output from frame
+`n` becomes the sole input for frame `n+1`. The summary emitted by
+`plan-chain` shows each frame's amount, fee, and change target so you can
+verify the state plane before relaying. Supplying `--broadcast` signs and sends
+the chained transactions in order, returning the list of DigiByte TXIDs.
+
 ## Manual Pattern Sending
 
 When you want to experiment with raw numeric motifs (e.g., Fibonacci fan-outs
