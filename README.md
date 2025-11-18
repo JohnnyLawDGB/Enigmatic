@@ -84,6 +84,10 @@ enigmatic-dgb send-message --to-address dgb1example --intent identity
 Need more guidance? Peek at [`CONTRIBUTING.md`](CONTRIBUTING.md) for environment
 setup tips, repository conventions, and review expectations.
 
+For an end-to-end walkthrough of building the toolchain, wiring RPC
+configuration, and exercising each CLI subcommand, read
+[`docs/TOOLING.md`](docs/TOOLING.md).
+
 ---
 
 ## Goals
