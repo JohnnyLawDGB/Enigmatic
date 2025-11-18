@@ -26,13 +26,14 @@ class RecordingBuilder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def send_payment_tx(self, outputs, fee, op_return_data=None, inputs=None):
+    def send_payment_tx(self, outputs, fee, op_return_data=None, inputs=None, script_plane=None):
         self.calls.append(
             {
                 "outputs": outputs,
                 "fee": fee,
                 "op_return": op_return_data,
                 "inputs": inputs,
+                "script_plane": script_plane,
             }
         )
         return f"txid-{len(self.calls)}"

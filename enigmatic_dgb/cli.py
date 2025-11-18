@@ -36,6 +36,7 @@ from .planner import (
     PREVIOUS_CHANGE_SENTINEL,
 )
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
+from .script_plane import ScriptPlane
 from .session import SessionContext
 from .symbol_sender import SessionRequiredError, prepare_symbol_send
 from .tx_builder import TransactionBuilder
@@ -576,9 +577,11 @@ def _print_sequence_summary(plan: PatternPlanSequence, op_returns: Sequence[str 
                     op_hint = f"{decoded} ({op_payload})"
             except (UnicodeDecodeError, ValueError):  # pragma: no cover - display only
                 op_hint = op_payload
+        script_desc = _format_script_plane(step.script_plane)
         print(
             f"  Tx {index}: {len(step.inputs)} input(s) totaling {_format_decimal(input_total)} DGB "
-            f"→ {outputs_desc} | fee {_format_decimal(step.fee)} DGB | {change_desc} | OP_RETURN {op_hint}"
+            f"→ {outputs_desc} | fee {_format_decimal(step.fee)} DGB | {change_desc} | "
+            f"OP_RETURN {op_hint} | script {script_desc}"
         )
 
 
@@ -618,6 +621,7 @@ def _execute_sequence_plan(
             float(step.fee),
             op_return_data=op_return_list,
             inputs=inputs,
+            script_plane=step.script_plane,
         )
         txids.append(txid)
         if change_index is not None:
@@ -883,10 +887,23 @@ def _print_chain_summary(plan: PlannedChain) -> None:
             if tx.change_output is not None
             else "no change output"
         )
+        script_desc = _format_script_plane(tx.script_plane)
         print(
             f"Frame {index}: send {_format_decimal(tx.to_output.amount)} DGB to {plan.to_address} "
-            f"(fee {_format_decimal(tx.fee)} DGB); {change_desc}"
+            f"(fee {_format_decimal(tx.fee)} DGB); {change_desc} | script {script_desc}"
         )
+
+
+def _format_script_plane(script_plane: ScriptPlane | None) -> str:
+    if script_plane is None:
+        return "legacy"
+    parts = [script_plane.script_type]
+    if script_plane.taproot_mode:
+        parts.append(script_plane.taproot_mode)
+    descriptor = "/".join(parts)
+    if script_plane.branch_id is not None:
+        descriptor += f" branch {script_plane.branch_id}"
+    return descriptor
 
 
 def _stdout_progress(message: str) -> None:

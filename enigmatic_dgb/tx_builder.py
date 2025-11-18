@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .rpc_client import DigiByteRPC, RPCError
+from .script_plane import ScriptPlane
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +77,16 @@ class TransactionBuilder:
         fee: float,
         op_return_data: list[str] | None = None,
         inputs: List[Dict[str, Any]] | None = None,
+        script_plane: ScriptPlane | None = None,
     ) -> str:
         """Create a signed raw transaction paying outputs with the provided fee."""
 
-        logger.info("Building transaction for %d outputs", len(outputs))
+        extra_log: Dict[str, Any] = {}
+        if script_plane is not None:
+            extra_log["script_plane"] = script_plane.to_dict()
+        logger.info(
+            "Building transaction for %d outputs", len(outputs), extra=extra_log or None
+        )
         if inputs is not None:
             prepared_outputs = self._prepare_outputs_payload(outputs, op_return_data)
             raw_tx = self.rpc.createrawtransaction(inputs, prepared_outputs)
@@ -143,6 +150,7 @@ class TransactionBuilder:
         fee: float,
         op_return_data: list[str] | None = None,
         inputs: List[Dict[str, Any]] | None = None,
+        script_plane: ScriptPlane | None = None,
     ) -> str:
         """Build and broadcast a payment transaction, returning the txid."""
 
@@ -151,6 +159,7 @@ class TransactionBuilder:
             fee,
             op_return_data=op_return_data,
             inputs=inputs,
+            script_plane=script_plane,
         )
         txid = self.rpc.sendrawtransaction(raw_tx)
         logger.info("Broadcasted transaction %s", txid)

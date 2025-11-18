@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Mapping, Sequence
 import yaml
 
 from .rpc_client import DigiByteRPC
+from .script_plane import ScriptPlane, parse_script_plane_block
 from .tx_builder import TransactionBuilder
 
 getcontext().prec = 16
@@ -46,6 +47,7 @@ class AutomationFrame:
     outputs: int | None = None
     delta: int | None = None
     sigma: int | None = None
+    script_plane: ScriptPlane | None = None
 
 
 @dataclass
@@ -58,6 +60,7 @@ class AutomationSymbol:
     delta: int
     sigma: int
     frames: list[AutomationFrame] | None = None
+    script_plane: ScriptPlane | None = None
 
     def chained_frames(self) -> list[AutomationFrame]:
         """Return the frames that define a chained symbol, if any."""
@@ -114,6 +117,15 @@ class AutomationDialect:
                         raise PlanningError(
                             f"Frame #{idx + 1} for symbol {entry.get('name')} missing value"
                         )
+                    frame_script_plane = None
+                    if frame_cfg.get("script_plane") is not None:
+                        frame_script_plane = parse_script_plane_block(
+                            frame_cfg["script_plane"],
+                            lambda msg, name=entry.get("name"):
+                                PlanningError(
+                                    f"Frame #{idx + 1} for symbol {name}: {msg}"
+                                ),
+                        )
                     frames.append(
                         AutomationFrame(
                             value=Decimal(str(frame_cfg["value"])),
@@ -122,8 +134,16 @@ class AutomationDialect:
                             outputs=int(frame_cfg["n"]) if "n" in frame_cfg else None,
                             delta=int(frame_cfg["delta"]) if "delta" in frame_cfg else None,
                             sigma=int(frame_cfg["sigma"]) if "sigma" in frame_cfg else None,
+                            script_plane=frame_script_plane,
                         )
                     )
+            symbol_script_plane = None
+            if match.get("script_plane") is not None:
+                symbol_script_plane = parse_script_plane_block(
+                    match["script_plane"],
+                    lambda msg, sym_name=entry.get("name"):
+                        PlanningError(f"Symbol {sym_name}: {msg}"),
+                )
             symbol = AutomationSymbol(
                 name=str(entry["name"]),
                 value=Decimal(str(match["value"])),
@@ -133,6 +153,7 @@ class AutomationDialect:
                 delta=int(match.get("delta", 0)),
                 sigma=int(match.get("sigma", 0)),
                 frames=frames,
+                script_plane=symbol_script_plane,
             )
             symbols[symbol.name] = symbol
         if not symbols:
@@ -155,6 +176,7 @@ class SymbolPlan:
     change_amount: Decimal
     fee: Decimal
     block_target: int | None
+    script_plane: ScriptPlane | None = None
 
     def to_jsonable(self) -> Dict[str, Any]:
         return {
@@ -165,6 +187,7 @@ class SymbolPlan:
             "outputs": {addr: str(amount) for addr, amount in self.outputs.items()},
             "change": str(self.change_amount.quantize(EIGHT_DP)),
             "block_target": self.block_target,
+            "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
 
@@ -193,6 +216,7 @@ class PatternPlan:
     outputs: List[PatternOutput]
     change_output: PatternOutput | None
     fee: Decimal
+    script_plane: ScriptPlane | None = None
 
     def as_rpc_inputs(self) -> List[Dict[str, Any]]:
         return [{"txid": item.txid, "vout": item.vout} for item in self.inputs]
@@ -211,6 +235,7 @@ class PatternPlan:
             "change": self.change_output.to_jsonable(len(self.outputs))
             if self.change_output is not None
             else None,
+            "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
 
@@ -230,6 +255,7 @@ class PlannedTx:
     to_output: PatternOutput
     change_output: PatternOutput | None
     fee: Decimal
+    script_plane: ScriptPlane | None = None
 
     def as_rpc_inputs(self) -> List[Dict[str, Any]]:
         return [{"txid": item.txid, "vout": item.vout} for item in self.inputs]
@@ -249,6 +275,7 @@ class PlannedTx:
             "change": self.change_output.to_jsonable(1)
             if self.change_output is not None
             else None,
+            "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
 
@@ -279,6 +306,7 @@ class PlannedChain:
                     outputs=outputs,
                     change_output=tx.change_output,
                     fee=tx.fee,
+                    script_plane=tx.script_plane,
                 )
             )
         return PatternPlanSequence(steps=steps)
@@ -294,7 +322,8 @@ class SymbolPlanner:
         block_target = current_height + symbol.delta if symbol.delta > 0 else None
         utxos = self.rpc.listunspent(self.automation.min_confirmations)
         selected, total = self._select_utxos(utxos, symbol.inputs, symbol.value + symbol.fee)
-        receiver_address = receiver or self.rpc.getnewaddress()
+        script_plane = symbol.script_plane
+        receiver_address = receiver or self._address_for_script_plane(script_plane)
         outputs: Dict[str, Decimal] = {receiver_address: symbol.value}
         change_amount = (total - symbol.value - symbol.fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
         if symbol.outputs > 1:
@@ -316,6 +345,7 @@ class SymbolPlanner:
             change_amount=change_amount,
             fee=symbol.fee,
             block_target=block_target,
+            script_plane=script_plane,
         )
 
     def plan_chain(
@@ -334,7 +364,7 @@ class SymbolPlanner:
             frames = frames[:max_frames]
         if not frames:
             raise PlanningError("max_frames truncated the chain to zero frames")
-        to_address = receiver or self.rpc.getnewaddress()
+        to_address = receiver or self._address_for_script_plane(symbol.script_plane)
         normalized_frames: list[AutomationFrame] = []
         for frame in frames:
             normalized_frames.append(
@@ -419,12 +449,14 @@ class SymbolPlanner:
                 previous_change_amount = None
             if index == 0:
                 initial_utxos = list(inputs)
+            tx_script_plane = frame.script_plane or symbol.script_plane
             transactions.append(
                 PlannedTx(
                     inputs=inputs,
                     to_output=to_output,
                     change_output=change_output,
                     fee=fee,
+                    script_plane=tx_script_plane,
                 )
             )
         assert initial_utxos is not None  # for mypy; first frame always sets it
@@ -515,6 +547,14 @@ class SymbolPlanner:
             distributed += amount
         return outputs
 
+    def _address_for_script_plane(self, script_plane: ScriptPlane | None) -> str:
+        if script_plane and script_plane.script_type.lower() == "p2tr":
+            try:
+                return self.rpc.getnewaddress(address_type="bech32m")
+            except TypeError:  # pragma: no cover - older node compatibility
+                return self.rpc.getnewaddress()
+        return self.rpc.getnewaddress()
+
 
 def plan_explicit_pattern(
     rpc: DigiByteRPC,
@@ -523,6 +563,7 @@ def plan_explicit_pattern(
     amounts: Sequence[Decimal],
     fee: Decimal,
     min_confirmations: int = 1,
+    script_plane: ScriptPlane | None = None,
 ) -> PatternPlanSequence:
     if not amounts:
         raise PlanningError("At least one output amount must be provided")
@@ -598,6 +639,7 @@ def plan_explicit_pattern(
                 outputs=step_outputs,
                 change_output=change_output,
                 fee=fee,
+                script_plane=script_plane,
             )
         )
         pending_change_amount = change_amount
@@ -639,6 +681,7 @@ def broadcast_pattern_plan(
             float(step.fee),
             op_return_data=payload_list,
             inputs=rpc_inputs,
+            script_plane=step.script_plane,
         )
         txids.append(txid)
         if progress_callback is not None:

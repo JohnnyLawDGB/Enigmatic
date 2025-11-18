@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from datetime import datetime
@@ -10,6 +11,7 @@ from typing import Callable, Dict, Iterable, List, Sequence, Set
 from .decoder import EnigmaticDecoder, ObservedTx, group_into_packets
 from .model import EncodingConfig, EnigmaticMessage
 from .rpc_client import DigiByteRPC
+from .script_plane import ScriptPlane
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,9 @@ class Watcher:
             if timestamp is None:
                 # TODO: use block timestamp from gettransaction if available.
                 timestamp = int(time.time())
+            decoded_tx = self._get_decoded_transaction(str(txid))
+            op_return = self._extract_op_return_from_decoded(decoded_tx)
+            script_plane = self._extract_script_plane(decoded_tx)
             observed.append(
                 ObservedTx(
                     txid=str(txid),
@@ -117,21 +122,24 @@ class Watcher:
                         if entry.get("fee") is not None
                         else None
                     ),
-                    op_return_data=self._extract_op_return_data(str(txid)),
+                    op_return_data=op_return,
+                    script_plane=script_plane,
                 )
             )
         return observed
 
-    def _extract_op_return_data(self, txid: str) -> bytes | None:
-        """Return the first OP_RETURN payload for ``txid`` if available."""
-
+    def _get_decoded_transaction(self, txid: str) -> dict | None:
         try:
             decoded = self.rpc.getrawtransaction(txid, True)
         except Exception:  # pragma: no cover - RPC issues surfaced at call site
-            logger.debug("Failed to decode transaction %s for OP_RETURN", txid)
+            logger.debug("Failed to decode transaction %s", txid)
             return None
-
         if not isinstance(decoded, dict):
+            return None
+        return decoded
+
+    def _extract_op_return_from_decoded(self, decoded: dict | None) -> bytes | None:
+        if not decoded:
             return None
         for vout in decoded.get("vout", []) or []:
             script = vout.get("scriptPubKey") or {}
@@ -154,3 +162,35 @@ class Watcher:
             except ValueError:  # pragma: no cover - malformed script
                 continue
         return None
+
+    def _extract_script_plane(self, decoded: dict | None) -> ScriptPlane | None:
+        if not decoded:
+            return None
+        vins = decoded.get("vin") or []
+        for vin in vins:
+            witness = vin.get("txinwitness") or []
+            if not witness:
+                continue
+            if len(witness) == 1:
+                return ScriptPlane(script_type="p2tr", taproot_mode="key_path")
+            script_hex: str | None = None
+            if len(witness) >= 2:
+                script_hex = witness[-2]
+            branch_id = None
+            if script_hex:
+                branch_id = self._branch_id_from_script(script_hex)
+            return ScriptPlane(
+                script_type="p2tr",
+                taproot_mode="script_path",
+                branch_id=branch_id,
+            )
+        return None
+
+    @staticmethod
+    def _branch_id_from_script(script_hex: str) -> int:
+        try:
+            script_bytes = bytes.fromhex(script_hex)
+        except ValueError:  # pragma: no cover - malformed witness data
+            return 0
+        digest = hashlib.sha256(script_bytes).digest()
+        return digest[0]
