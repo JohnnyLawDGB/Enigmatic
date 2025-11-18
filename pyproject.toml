@@ -28,5 +28,8 @@ dev = [
 [project.scripts]
 enigmatic-dgb = "enigmatic_dgb.cli:main"
 
+[tool.setuptools]
+packages = ["enigmatic_dgb"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
