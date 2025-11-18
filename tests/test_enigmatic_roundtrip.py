@@ -103,4 +103,6 @@ def test_decoder_emits_script_plane_metadata() -> None:
         )
     ]
     message = decoder.decode_packet(packet, channel="default")
-    assert message.payload["script_plane"]["branch_id"] == 11
+    payload_plane = message.payload["script_plane"]
+    assert payload_plane["branch_id"] == 11
+    assert payload_plane["aggregation"]["aggregation_mode"] == "none"

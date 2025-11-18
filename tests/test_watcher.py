@@ -18,6 +18,7 @@ def test_extract_script_plane_key_path() -> None:
     assert plane.script_type == "p2tr"
     assert plane.taproot_mode == "key_path"
     assert plane.branch_id is None
+    assert plane.aggregation.aggregation_mode == "none"
 
 
 def test_extract_script_plane_script_path() -> None:
