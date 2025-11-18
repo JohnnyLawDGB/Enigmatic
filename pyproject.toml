@@ -29,7 +29,10 @@ dev = [
 enigmatic-dgb = "enigmatic_dgb.cli:main"
 
 [tool.setuptools]
-packages = ["enigmatic_dgb"]
+
+[tool.setuptools.packages.find]
+include = ["enigmatic_dgb*"]
+exclude = ["specs*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
