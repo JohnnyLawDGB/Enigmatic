@@ -186,15 +186,51 @@ enigmatic-dgb plan-symbol \
 
 Both flows reuse the same planner abstraction so the change output from frame
 `n` becomes the sole input for frame `n+1`. The summary emitted by
-`plan-chain` shows each frame's amount, fee, and change target so you can
-verify the state plane before relaying. Supplying `--broadcast` signs and sends
-the chained transactions in order, returning the list of DigiByte TXIDs.
+`plan-chain` now also lists the initial funding UTXOs so you can verify exactly
+which coins will be consumed. Supplying `--broadcast` signs and sends the
+chained transactions in order, returning the list of DigiByte TXIDs.
+
+New CLI flags make chained automation smoother:
+
+- `--min-confirmations` controls the initial UTXO filter. Set it to `0` when you
+  want to use unconfirmed wallet outputs as the starting fuel for the chain.
+- `--min-confirmations-between-steps` tells the CLI to pause between frames
+  until the previous transaction has the requested number of confirmations.
+- `--wait-between-txs` sets the polling interval for the confirmation loop and
+  doubles as a pacing delay when confirmations are not required.
+- `--max-wait-seconds` lets you cap how long the CLI will wait before aborting.
+
+For explicit payment patterns (`plan-pattern`, `send-sequence`) and
+dialect-driven chains (`plan-chain`) the same flags are available so that you
+can build a full chain in one pass without refreshing `listunspent` between
+steps. When `--min-confirmations` is set to `0` the planner tracks the synthetic
+change internally and immediately references the previous change output in the
+next transaction.
 
 ## Unified CLI Workflows
 
 The modern CLI keeps the encoder, planner, and transaction builder aligned so
 that you can audit a pattern, attach optional OP_RETURN metadata, and broadcast
 through the same surface area.
+
+Example: build and broadcast a three-transaction sequence that pauses for one
+confirmation between each hop.
+
+```bash
+enigmatic-dgb plan-pattern \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 3.1,2.1,1.3 \
+  --fee 0.21 --broadcast \
+  --min-confirmations 0 \
+  --min-confirmations-between-steps 1 \
+  --wait-between-txs 10 --max-wait-seconds 600
+```
+
+The planner fetches the funding set once, prints the planned change flow, and
+then relays each transaction via the `TransactionBuilder`. If
+`--min-confirmations-between-steps` is greater than zero the CLI prints log
+lines such as `Tx1: waiting for 1 confirmations (current: 0)` until the RPC
+reports enough confirmations for the next frame.
 
 ### Dialect-driven symbols (`send-symbol`)
 

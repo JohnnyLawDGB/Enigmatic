@@ -234,6 +234,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Minimum confirmations required for funding UTXOs (default: 1)",
     )
+    pattern_parser.add_argument(
+        "--wait-between-txs",
+        type=float,
+        default=0.0,
+        help="Seconds to wait between chained broadcasts or confirmation polls",
+    )
+    pattern_parser.add_argument(
+        "--min-confirmations-between-steps",
+        type=int,
+        default=0,
+        help="Confirmations required between chained steps (default: 0)",
+    )
+    pattern_parser.add_argument(
+        "--max-wait-seconds",
+        type=float,
+        default=600.0,
+        help="Maximum time to wait for confirmations before aborting (default: 600)",
+    )
     pattern_https_group = pattern_parser.add_mutually_exclusive_group()
     pattern_https_group.add_argument(
         "--rpc-use-https",
@@ -270,6 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Destination address for the chained message",
     )
     chain_parser.add_argument(
+        "--min-confirmations",
+        type=int,
+        help="Override the dialect min_confirmations when selecting funding UTXOs",
+    )
+    chain_parser.add_argument(
         "--max-frames",
         type=int,
         help="Limit the number of frames included in the chain",
@@ -293,6 +316,24 @@ def build_parser() -> argparse.ArgumentParser:
     chain_parser.add_argument("--rpc-user", help="Override RPC username")
     chain_parser.add_argument("--rpc-password", help="Override RPC password")
     chain_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    chain_parser.add_argument(
+        "--wait-between-txs",
+        type=float,
+        default=0.0,
+        help="Seconds to wait between chained broadcasts or confirmation polls",
+    )
+    chain_parser.add_argument(
+        "--min-confirmations-between-steps",
+        type=int,
+        default=0,
+        help="Confirmations required between chained frames (default: 0)",
+    )
+    chain_parser.add_argument(
+        "--max-wait-seconds",
+        type=float,
+        default=600.0,
+        help="Maximum time to wait for confirmations before aborting (default: 600)",
+    )
     chain_https_group = chain_parser.add_mutually_exclusive_group()
     chain_https_group.add_argument(
         "--rpc-use-https",
@@ -342,6 +383,24 @@ def _configure_sequence_parser(parser: argparse.ArgumentParser, *, include_mode_
         type=int,
         default=1,
         help="Minimum confirmations required for funding UTXOs (default: 1)",
+    )
+    parser.add_argument(
+        "--wait-between-txs",
+        type=float,
+        default=0.0,
+        help="Seconds to wait between chained broadcasts or confirmation polls",
+    )
+    parser.add_argument(
+        "--min-confirmations-between-steps",
+        type=int,
+        default=0,
+        help="Confirmations required between chained steps (default: 0)",
+    )
+    parser.add_argument(
+        "--max-wait-seconds",
+        type=float,
+        default=600.0,
+        help="Maximum time to wait for confirmations before aborting (default: 600)",
     )
     parser.add_argument(
         "--op-return-hex",
@@ -528,6 +587,8 @@ def _execute_sequence_plan(
     plan: PatternPlanSequence,
     op_returns: Sequence[str | None],
 ) -> list[str]:
+    """Legacy helper retained for tests that exercise the previous interface."""
+
     if len(op_returns) != len(plan.steps):
         raise CLIError("OP_RETURN payload count must match the number of transactions")
     previous_change_ref: tuple[str, int] | None = None
@@ -738,7 +799,14 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     )
     print(json.dumps(plan.to_jsonable(), indent=2))
     if args.broadcast:
-        txids = broadcast_pattern_plan(rpc, plan)
+        txids = broadcast_pattern_plan(
+            rpc,
+            plan,
+            wait_between_txs=args.wait_between_txs,
+            min_confirmations_between_steps=args.min_confirmations_between_steps,
+            max_wait_seconds=args.max_wait_seconds,
+            progress_callback=_stdout_progress,
+        )
         print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
@@ -750,11 +818,22 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
     max_frames = _parse_max_frames(args.max_frames)
-    chain = planner.plan_chain(symbol, receiver=args.to_address, max_frames=max_frames)
+    chain = planner.plan_chain(
+        symbol,
+        receiver=args.to_address,
+        max_frames=max_frames,
+        min_confirmations=args.min_confirmations,
+    )
     _print_chain_summary(chain)
     print(json.dumps(chain.to_jsonable(), indent=2))
     if args.broadcast:
-        txids = planner.broadcast_chain(chain)
+        txids = planner.broadcast_chain(
+            chain,
+            wait_between_txs=args.wait_between_txs,
+            min_confirmations_between_steps=args.min_confirmations_between_steps,
+            max_wait_seconds=args.max_wait_seconds,
+            progress_callback=_stdout_progress,
+        )
         print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
@@ -776,13 +855,28 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
         print(json.dumps(plan.to_jsonable(), indent=2))
         return
     builder = TransactionBuilder(rpc)
-    txids = _execute_sequence_plan(builder, plan, op_returns)
+    txids = broadcast_pattern_plan(
+        rpc,
+        plan,
+        op_returns=op_returns,
+        wait_between_txs=args.wait_between_txs,
+        min_confirmations_between_steps=args.min_confirmations_between_steps,
+        max_wait_seconds=args.max_wait_seconds,
+        progress_callback=_stdout_progress,
+        builder=builder,
+    )
     print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
 def _print_chain_summary(plan: PlannedChain) -> None:
     """Emit a human-readable list of the transactions in a chained plan."""
 
+    if plan.initial_utxos:
+        print("Funding UTXOs:")
+        for utxo in plan.initial_utxos:
+            print(
+                f"  - {utxo.txid}:{utxo.vout} → {_format_decimal(utxo.amount)} DGB"
+            )
     for index, tx in enumerate(plan.transactions, start=1):
         change_desc = (
             f"change {_format_decimal(tx.change_output.amount)} → {tx.change_output.address}"
@@ -793,6 +887,10 @@ def _print_chain_summary(plan: PlannedChain) -> None:
             f"Frame {index}: send {_format_decimal(tx.to_output.amount)} DGB to {plan.to_address} "
             f"(fee {_format_decimal(tx.fee)} DGB); {change_desc}"
         )
+
+
+def _stdout_progress(message: str) -> None:
+    print(message)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

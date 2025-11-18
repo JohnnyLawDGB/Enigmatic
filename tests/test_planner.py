@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+import enigmatic_dgb.planner as planner_module
 from enigmatic_dgb.planner import (
     AutomationDialect,
     AutomationFrame,
@@ -61,6 +62,22 @@ class DummyRPC:
         self._tx_index += 1
         self.sent_txids.append(txid)
         return txid
+
+
+class StubBuilder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[dict[str, int]], dict[str, float], list[str] | None, float]] = []
+
+    def send_payment_tx(
+        self,
+        outputs: dict[str, float],
+        fee: float,
+        op_return_data: list[str] | None = None,
+        inputs: list[dict[str, int]] | None = None,
+    ) -> str:
+        prepared_inputs = list(inputs or [])
+        self.calls.append((prepared_inputs, dict(outputs), op_return_data, fee))
+        return f"stub-tx-{len(self.calls)}"
 
 
 @pytest.fixture()
@@ -179,11 +196,12 @@ def test_broadcast_pattern_plan_uses_same_stack() -> None:
         amounts=[Decimal("1.0"), Decimal("0.5")],
         fee=Decimal("0.1"),
     )
-    txids = broadcast_pattern_plan(rpc, plan)
-    assert txids == ["broadcast-txid-0", "broadcast-txid-1"]
-    assert len(rpc.tx_history) == 2
-    first_inputs, _ = rpc.tx_history[0]
-    second_inputs, _ = rpc.tx_history[1]
+    builder = StubBuilder()
+    txids = broadcast_pattern_plan(rpc, plan, builder=builder)
+    assert txids == ["stub-tx-1", "stub-tx-2"]
+    assert len(builder.calls) == 2
+    first_inputs = builder.calls[0][0]
+    second_inputs = builder.calls[1][0]
     assert len(first_inputs) == len(plan.steps[0].inputs)
     assert second_inputs[0]["txid"] == txids[0]
 
@@ -204,6 +222,125 @@ def test_plan_explicit_pattern_rejects_dust_chain() -> None:
             fee=Decimal("0.00001"),
         )
 
+
+def test_plan_chain_single_funding_utxo(automation: AutomationMetadata) -> None:
+    class SingleUTXORPC(DummyRPC):
+        def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
+            return [
+                {"txid": "solo", "vout": 0, "amount": "9.0", "spendable": True},
+            ]
+
+    rpc = SingleUTXORPC()
+    frames = [
+        AutomationFrame(value=Decimal("2"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+        AutomationFrame(value=Decimal("1.5"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+    ]
+    symbol = AutomationSymbol(
+        name="CHAIN_SINGLE",
+        value=Decimal("2"),
+        fee=Decimal("0.1"),
+        inputs=1,
+        outputs=2,
+        delta=0,
+        sigma=0,
+        frames=frames,
+    )
+    planner = SymbolPlanner(rpc, automation)
+    chain = planner.plan_chain(symbol, receiver="dgb1target")
+    assert [f"{item.txid}:{item.vout}" for item in chain.initial_utxos] == ["solo:0"]
+    assert chain.transactions[0].inputs[0].txid == "solo"
+    assert chain.transactions[1].inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
+
+
+def test_plan_chain_multiple_funding_utxos(automation: AutomationMetadata) -> None:
+    class MultiUTXORPC(DummyRPC):
+        def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
+            return [
+                {"txid": "first", "vout": 0, "amount": "3.0", "spendable": True},
+                {"txid": "second", "vout": 1, "amount": "3.0", "spendable": True},
+            ]
+
+    rpc = MultiUTXORPC()
+    frames = [
+        AutomationFrame(value=Decimal("4"), fee=Decimal("0.1"), inputs=2, outputs=2, delta=0, sigma=0),
+        AutomationFrame(value=Decimal("1"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+    ]
+    symbol = AutomationSymbol(
+        name="CHAIN_MULTI",
+        value=Decimal("4"),
+        fee=Decimal("0.1"),
+        inputs=2,
+        outputs=2,
+        delta=0,
+        sigma=0,
+        frames=frames,
+    )
+    planner = SymbolPlanner(rpc, automation)
+    chain = planner.plan_chain(symbol, receiver="dgb1dest")
+    assert [f"{item.txid}:{item.vout}" for item in chain.initial_utxos] == ["first:0", "second:1"]
+    assert len(chain.transactions[0].inputs) == 2
+    assert chain.transactions[1].inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
+
+
+def test_broadcast_pattern_plan_allows_unconfirmed_change() -> None:
+    rpc = DummyRPC()
+    plan = plan_explicit_pattern(
+        rpc,
+        to_address="dgb1target",
+        amounts=[Decimal("1.0"), Decimal("0.4")],
+        fee=Decimal("0.1"),
+    )
+    builder = StubBuilder()
+    txids = broadcast_pattern_plan(
+        rpc,
+        plan,
+        builder=builder,
+        min_confirmations_between_steps=0,
+    )
+    assert txids == ["stub-tx-1", "stub-tx-2"]
+    assert len(builder.calls) == 2
+
+
+def test_broadcast_pattern_plan_waits_for_confirmations(monkeypatch) -> None:
+    class WaitingRPC(DummyRPC):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tx_conf: dict[str, list[int]] = {}
+            self._poll_index: dict[str, int] = {}
+
+        def gettransaction(self, txid: str, include_watchonly: bool = True) -> dict[str, int]:
+            sequence = self.tx_conf.get(txid, [0])
+            index = self._poll_index.get(txid, 0)
+            value = sequence[min(index, len(sequence) - 1)]
+            self._poll_index[txid] = index + 1
+            return {"confirmations": value}
+
+    rpc = WaitingRPC()
+    plan = plan_explicit_pattern(
+        rpc,
+        to_address="dgb1target",
+        amounts=[Decimal("1.0"), Decimal("0.4")],
+        fee=Decimal("0.1"),
+    )
+    builder = StubBuilder()
+    rpc.tx_conf["stub-tx-1"] = [0, 0, 1]
+    sleeps: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(planner_module.time, "sleep", fake_sleep)
+    txids = broadcast_pattern_plan(
+        rpc,
+        plan,
+        builder=builder,
+        min_confirmations_between_steps=1,
+        wait_between_txs=2.0,
+        max_wait_seconds=10.0,
+    )
+    assert txids == ["stub-tx-1", "stub-tx-2"]
+    assert rpc._poll_index["stub-tx-1"] >= 3
+    assert sleeps == [2.0, 2.0]
 
 def test_symbol_planner_chain_links_change(automation: AutomationMetadata) -> None:
     class ChainRPC(DummyRPC):
