@@ -16,7 +16,7 @@ formal specs under `specs/`.
 ## 2. Build & install the CLI
 
 ```bash
-git clone https://github.com/<org>/Enigmatic.git
+git clone https://github.com/JohnnyLawDGB/Enigmatic.git
 cd Enigmatic
 python -m venv .venv
 source .venv/bin/activate

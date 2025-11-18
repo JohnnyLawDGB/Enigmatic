@@ -69,7 +69,7 @@ that the system behaves like regular DigiByte usage.
 ## Quickstart
 
 ```bash
-git clone https://github.com/<org>/Enigmatic.git
+git clone https://github.com/JohnnyLawDGB/Enigmatic.git
 cd Enigmatic
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
