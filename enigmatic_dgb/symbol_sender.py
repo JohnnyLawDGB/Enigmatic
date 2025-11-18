@@ -15,7 +15,7 @@ from typing import Any
 
 from .dialect import Dialect, DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instructions
-from .model import EncodingConfig
+from .model import EncodingConfig, EnigmaticMessage
 from .rpc_client import DigiByteRPC
 from .session import SessionContext, session_key_to_passphrase
 from .tx_builder import TransactionBuilder
@@ -27,8 +27,7 @@ class SessionRequiredError(RuntimeError):
     """Raised when a session-bound symbol is sent without an active session."""
 
 
-def send_symbol(
-    rpc: DigiByteRPC,
+def prepare_symbol_send(
     dialect: Dialect,
     symbol_name: str,
     to_address: str,
@@ -36,14 +35,9 @@ def send_symbol(
     extra_payload: dict[str, Any] | None = None,
     encrypt_with_passphrase: str | None = None,
     session: SessionContext | None = None,
-) -> list[str]:
-    """Encode and broadcast a dialect symbol.
-
-    Returns the transaction ids emitted while enforcing simple, legitimate
-    experimental signaling patterns.  This helper does not attempt any hidden
-    behavior; it simply bridges symbolic definitions to spend patterns so that
-    external systems (like REAL) can remain offline.
-    """
+    fee_override: float | None = None,
+) -> tuple[EnigmaticMessage, list[SpendInstruction], float]:
+    """Return the message metadata and spend instructions for a symbol send."""
 
     symbol = dialect.symbols.get(symbol_name)
     if symbol is None:
@@ -68,7 +62,11 @@ def send_symbol(
         encrypt_passphrase = session_key_to_passphrase(session.session_key)
 
     config = EncodingConfig.enigmatic_default()
-    config.fee_punctuation = dialect.fee_punctuation
+    config.fee_punctuation = (
+        float(fee_override)
+        if fee_override is not None
+        else float(dialect.fee_punctuation)
+    )
     encoder = EnigmaticEncoder(config, target_address=to_address)
     message, instructions, fee = encoder.encode_symbol(
         symbol,
@@ -76,15 +74,40 @@ def send_symbol(
         extra_payload=extra_payload,
         encrypt_with_passphrase=encrypt_passphrase,
     )
-
     if not instructions:
         raise RuntimeError("Symbol encoding produced no spend instructions")
+    return message, instructions, fee
+
+
+def send_symbol(
+    rpc: DigiByteRPC,
+    dialect: Dialect,
+    symbol_name: str,
+    to_address: str,
+    channel: str = "default",
+    extra_payload: dict[str, Any] | None = None,
+    encrypt_with_passphrase: str | None = None,
+    session: SessionContext | None = None,
+    fee_override: float | None = None,
+) -> list[str]:
+    """Encode and broadcast a dialect symbol using :class:`TransactionBuilder`."""
+
+    message, instructions, fee = prepare_symbol_send(
+        dialect,
+        symbol_name,
+        to_address,
+        channel=channel,
+        extra_payload=extra_payload,
+        encrypt_with_passphrase=encrypt_with_passphrase,
+        session=session,
+        fee_override=fee_override,
+    )
 
     outputs, op_returns = aggregate_spend_instructions(instructions)
     builder = TransactionBuilder(rpc)
     txid = builder.send_payment_tx(outputs, fee, op_return_data=[data.hex() for data in op_returns])
     logger.info(
-        "Sent symbol %s for channel %s via txid %s", symbol.name, message.channel, txid
+        "Sent symbol %s for channel %s via txid %s", symbol_name, message.channel, txid
     )
     return [txid]
 
@@ -98,6 +121,7 @@ def load_and_send_symbol(
     extra_payload: dict[str, Any] | None = None,
     encrypt_with_passphrase: str | None = None,
     session: SessionContext | None = None,
+    fee_override: float | None = None,
 ) -> list[str]:
     """Convenience wrapper that loads a dialect from disk then sends the symbol."""
 
@@ -111,6 +135,7 @@ def load_and_send_symbol(
         extra_payload=extra_payload,
         encrypt_with_passphrase=encrypt_with_passphrase,
         session=session,
+        fee_override=fee_override,
     )
 
 

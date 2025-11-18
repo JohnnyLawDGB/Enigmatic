@@ -190,38 +190,64 @@ Both flows reuse the same planner abstraction so the change output from frame
 verify the state plane before relaying. Supplying `--broadcast` signs and sends
 the chained transactions in order, returning the list of DigiByte TXIDs.
 
-## Manual Pattern Sending
+## Unified CLI Workflows
 
-When you want to experiment with raw numeric motifs (e.g., Fibonacci fan-outs
-or 21M ↔ 21B callbacks) without defining a formal dialect, use the
-`plan-pattern` command. It shares the same RPC plumbing as `plan-symbol` and
-lets you specify each output amount directly.
+The modern CLI keeps the encoder, planner, and transaction builder aligned so
+that you can audit a pattern, attach optional OP_RETURN metadata, and broadcast
+through the same surface area.
+
+### Dialect-driven symbols (`send-symbol`)
+
+Use `enigmatic-dgb send-symbol` to encode any YAML dialect symbol and relay the
+result via the `TransactionBuilder`. The command accepts optional
+session/encryption parameters, `--fee` overrides, and a `--dry-run` flag that
+prints a compact summary of the aggregated outputs plus any OP_RETURN hints the
+encoder generated.
 
 ```bash
-export DGB_RPC_USER="rpcuser"
-export DGB_RPC_PASSWORD="rpcpass"
-
-enigmatic-dgb plan-pattern \
+enigmatic-dgb send-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT_CHAIN \
   --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --amounts 21.0,34.0,55.0,0.303 \
-  --fee 0.21
-
-# Once the plan looks good, re-run with --broadcast to sign + relay it.
-enigmatic-dgb plan-pattern \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --amounts 21.0,34.0,55.0,0.303 \
-  --fee 0.21 \
-  --broadcast
+  --channel ops --dry-run
 ```
 
-Because DigiByte Core forbids duplicate outputs to the same address within a
-single JSON object, the planner automatically creates a chained plan where each
-amount is sent in its own transaction. The `--fee` flag applies per
-transaction, so the total cost is the sum of all amounts plus `fee × steps`. Each
-dry run prints the selected inputs, ordered outputs, fee, and change for every
-step so you can audit the chain before flipping the broadcast flag. When
-`--broadcast` is supplied, the CLI returns the list of transaction IDs in the
-order they were relayed.
+The dry-run flow shows each value-plane spend, the total fee punctuation, and
+the OP_RETURN digest (if emitted) before signing anything. Drop `--dry-run`
+once the state vector looks correct to broadcast the symbol. Supplying `--fee`
+lets you override the dialect's punctuation when coordinating with wallets that
+prefer different absolute fees.
+
+### Pattern sequences (`send-sequence` / `plan-sequence`)
+
+When you want to experiment with ad-hoc numeric motifs (e.g., Fibonacci fan-outs
+or prime staircases) without maintaining a dialect file, use
+`enigmatic-dgb send-sequence`. The command takes a comma-separated list of
+amounts, a per-transaction fee, and optional OP_RETURN payloads for each hop.
+`plan-sequence` is a read-only alias that always stops after planning.
+
+```bash
+# Inspect the 7-part ISEEYOU PrimeSeries without broadcasting
+enigmatic-dgb send-sequence \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 73,61,47,37,23,13,5 \
+  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U --dry-run
+
+# Execute the same plan, emitting chained txids in order
+enigmatic-dgb send-sequence \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 73,61,47,37,23,13,5 \
+  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
+```
+
+Each dry run prints a per-transaction table that shows the funded inputs, the
+destination amount, change routing, and the decoded OP_RETURN hint. Broadcasting
+reuses the same plan and streams the txids in order, chaining the change output
+from transaction _n_ into transaction _n+1_.
+
+You can still fall back to `plan-pattern`/`plan-chain` for legacy automation
+scripts, but the new unified commands keep the dialect, encoder, planner, and
+TxBuilder in lockstep.
 
 ## Documentation & Spec Map
 

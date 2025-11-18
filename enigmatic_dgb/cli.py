@@ -15,7 +15,7 @@ import binascii
 import json
 import logging
 import sys
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Sequence
@@ -26,15 +26,18 @@ from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instruc
 from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
+    PatternPlan,
+    PatternPlanSequence,
     PlanningError,
     PlannedChain,
     SymbolPlanner,
     broadcast_pattern_plan,
     plan_explicit_pattern,
+    PREVIOUS_CHANGE_SENTINEL,
 )
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
 from .session import SessionContext
-from .symbol_sender import SessionRequiredError, send_symbol
+from .symbol_sender import SessionRequiredError, prepare_symbol_send
 from .tx_builder import TransactionBuilder
 from .watcher import Watcher
 
@@ -125,6 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--session-dialect",
         default=None,
         help="Dialect name tied to the provided session",
+    )
+    symbol_parser.add_argument(
+        "--fee",
+        default=None,
+        help="Override the per-transaction fee punctuation defined by the dialect",
+    )
+    symbol_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Encode and summarize the symbol without broadcasting",
     )
 
     planner_parser = subparsers.add_parser(
@@ -297,7 +310,55 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chain_parser.set_defaults(rpc_use_https=None)
 
+    send_sequence_parser = subparsers.add_parser(
+        "send-sequence",
+        help="Send an explicit chained payment sequence",
+    )
+    _configure_sequence_parser(send_sequence_parser, include_mode_flags=True)
+
+    plan_sequence_parser = subparsers.add_parser(
+        "plan-sequence",
+        help="Inspect a chained payment sequence without broadcasting",
+    )
+    _configure_sequence_parser(plan_sequence_parser, include_mode_flags=False)
+
     return parser
+
+
+def _configure_sequence_parser(parser: argparse.ArgumentParser, *, include_mode_flags: bool) -> None:
+    parser.add_argument("--to-address", required=True, help="Destination DGB address")
+    parser.add_argument(
+        "--amounts",
+        required=True,
+        help="Comma-separated list of output amounts in DGB (e.g. 73,61,47)",
+    )
+    parser.add_argument(
+        "--fee",
+        default="0.21",
+        help="Per-transaction fee in DGB (default: 0.21)",
+    )
+    parser.add_argument(
+        "--min-confirmations",
+        type=int,
+        default=1,
+        help="Minimum confirmations required for funding UTXOs (default: 1)",
+    )
+    parser.add_argument(
+        "--op-return-hex",
+        help="Comma-separated list of OP_RETURN payloads encoded as hex",
+    )
+    parser.add_argument(
+        "--op-return-ascii",
+        help="Comma-separated list of OP_RETURN payloads encoded as ASCII",
+    )
+    if include_mode_flags:
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Plan the sequence without broadcasting",
+        )
+    else:
+        parser.set_defaults(dry_run=True)
 
 
 def _parse_payload_json(payload_json: str) -> dict[str, Any]:
@@ -311,7 +372,7 @@ def _parse_payload_json(payload_json: str) -> dict[str, Any]:
 
 
 def _parse_amounts_csv(raw: str) -> list[Decimal]:
-    parts = [segment.strip() for segment in raw.split(",") if segment.strip()]
+    parts = _split_csv(raw)
     if not parts:
         raise CLIError("--amounts must include at least one value")
     amounts: list[Decimal] = []
@@ -322,6 +383,10 @@ def _parse_amounts_csv(raw: str) -> list[Decimal]:
             raise CLIError(f"Amount #{index + 1} is not a valid decimal value: {part}") from exc
         amounts.append(amount)
     return amounts
+
+
+def _split_csv(raw: str) -> list[str]:
+    return [segment.strip() for segment in raw.split(",") if segment.strip()]
 
 
 def _parse_decimal(value: str, flag: str) -> Decimal:
@@ -369,6 +434,136 @@ def _aggregate_outputs(
 ) -> tuple[dict[str, float], list[str]]:
     outputs, op_returns = aggregate_spend_instructions(instructions)
     return outputs, [data.hex() for data in op_returns]
+
+
+def _parse_op_return_args(
+    op_return_hex: str | None, op_return_ascii: str | None, expected: int
+) -> list[str | None]:
+    if expected <= 0:
+        return []
+    if op_return_hex and op_return_ascii:
+        raise CLIError("Specify either --op-return-hex or --op-return-ascii, not both")
+    if not op_return_hex and not op_return_ascii:
+        return [None] * expected
+    values = _split_csv(op_return_hex or op_return_ascii or "")
+    if len(values) != expected:
+        raise CLIError("Number of OP_RETURN entries must match the number of --amounts")
+    if op_return_hex:
+        normalized: list[str | None] = []
+        for entry in values:
+            normalized.append(_normalize_hex(entry))
+        return normalized
+    ascii_payloads: list[str] = []
+    for entry in values:
+        if not entry:
+            raise CLIError("OP_RETURN ASCII entries must be non-empty")
+        ascii_payloads.append(entry.encode("utf-8").hex())
+    return ascii_payloads
+
+
+def _normalize_hex(value: str) -> str:
+    candidate = value.strip().lower()
+    if candidate.startswith("0x"):
+        candidate = candidate[2:]
+    if not candidate:
+        raise CLIError("Hex payloads must be non-empty")
+    try:
+        bytes.fromhex(candidate)
+    except ValueError as exc:  # pragma: no cover - input validation
+        raise CLIError(f"Invalid hex payload: {value}") from exc
+    return candidate
+
+
+def _print_symbol_summary(
+    message: EnigmaticMessage, outputs: dict[str, float], op_returns: list[str], fee: float
+) -> None:
+    print(f"Symbol summary for {message.payload.get('symbol', message.intent)} on {message.channel}")
+    for address, amount in outputs.items():
+        print(f"  → {_format_decimal(Decimal(str(amount)))} DGB to {address}")
+    if op_returns:
+        for idx, payload in enumerate(op_returns, start=1):
+            hint = payload
+            try:
+                decoded = bytes.fromhex(payload).decode("utf-8")
+                if decoded:
+                    hint = f"{decoded} ({payload})"
+            except (UnicodeDecodeError, ValueError):  # pragma: no cover - display only
+                hint = payload
+            print(f"  OP_RETURN #{idx}: {hint}")
+    print(f"  Fee punctuation: {_format_decimal(Decimal(str(fee)))} DGB")
+
+
+def _print_sequence_summary(plan: PatternPlanSequence, op_returns: Sequence[str | None]) -> None:
+    print("Sequence plan:")
+    for index, step in enumerate(plan.steps, start=1):
+        input_total = sum(entry.amount for entry in step.inputs)
+        outputs_desc = ", ".join(
+            f"{_format_decimal(output.amount)} → {output.address}" for output in step.outputs
+        )
+        if not outputs_desc:
+            outputs_desc = "(no value outputs)"
+        change_desc = (
+            f"change {_format_decimal(step.change_output.amount)} → {step.change_output.address}"
+            if step.change_output is not None
+            else "no change"
+        )
+        op_payload = op_returns[index - 1] if index - 1 < len(op_returns) else None
+        op_hint = "-"
+        if op_payload:
+            op_hint = op_payload
+            try:
+                decoded = bytes.fromhex(op_payload).decode("utf-8")
+                if decoded:
+                    op_hint = f"{decoded} ({op_payload})"
+            except (UnicodeDecodeError, ValueError):  # pragma: no cover - display only
+                op_hint = op_payload
+        print(
+            f"  Tx {index}: {len(step.inputs)} input(s) totaling {_format_decimal(input_total)} DGB "
+            f"→ {outputs_desc} | fee {_format_decimal(step.fee)} DGB | {change_desc} | OP_RETURN {op_hint}"
+        )
+
+
+def _execute_sequence_plan(
+    builder: TransactionBuilder,
+    plan: PatternPlanSequence,
+    op_returns: Sequence[str | None],
+) -> list[str]:
+    if len(op_returns) != len(plan.steps):
+        raise CLIError("OP_RETURN payload count must match the number of transactions")
+    previous_change_ref: tuple[str, int] | None = None
+    txids: list[str] = []
+    for index, step in enumerate(plan.steps):
+        inputs: list[dict[str, Any]] = []
+        for entry in step.inputs:
+            if entry.txid == PREVIOUS_CHANGE_SENTINEL:
+                if previous_change_ref is None:
+                    raise CLIError(
+                        "Chained plan referenced a change output before it was created"
+                    )
+                inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+            else:
+                inputs.append({"txid": entry.txid, "vout": entry.vout})
+        ordered_outputs: OrderedDict[str, float] = OrderedDict()
+        for output in step.outputs:
+            ordered_outputs[output.address] = float(output.amount)
+        change_index: int | None = None
+        if step.change_output is not None:
+            change_index = len(step.outputs)
+            ordered_outputs[step.change_output.address] = float(step.change_output.amount)
+        payload = op_returns[index]
+        op_return_list = [payload] if payload else None
+        txid = builder.send_payment_tx(
+            ordered_outputs,
+            float(step.fee),
+            op_return_data=op_return_list,
+            inputs=inputs,
+        )
+        txids.append(txid)
+        if change_index is not None:
+            previous_change_ref = (txid, change_index)
+        else:
+            previous_change_ref = None
+    return txids
 
 
 def cmd_send_message(args: argparse.Namespace) -> None:
@@ -448,20 +643,40 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
             session_key=session_key,
         )
 
+    fee_override = None
+    if args.fee is not None:
+        fee_override = float(_parse_decimal(args.fee, "--fee"))
+
     try:
-        txids = send_symbol(
-            rpc,
-            dialect=dialect,
-            symbol_name=args.symbol,
-            to_address=args.to_address,
+        message, instructions, fee = prepare_symbol_send(
+            dialect,
+            args.symbol,
+            args.to_address,
             channel=args.channel,
             extra_payload=extra_payload,
             encrypt_with_passphrase=args.encrypt_with_passphrase,
             session=session,
+            fee_override=fee_override,
         )
     except SessionRequiredError as exc:
         raise CLIError(str(exc)) from exc
-    print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+
+    outputs, op_returns_hex = _aggregate_outputs(instructions)
+    if args.dry_run:
+        _print_symbol_summary(message, outputs, op_returns_hex, fee)
+        summary = {
+            "symbol": args.symbol,
+            "channel": args.channel,
+            "fee": f"{fee:.8f}",
+            "outputs": outputs,
+            "op_returns": op_returns_hex,
+        }
+        print(json.dumps(summary, indent=2))
+        return
+
+    builder = TransactionBuilder(rpc)
+    txid = builder.send_payment_tx(outputs, fee, op_return_data=op_returns_hex)
+    print(json.dumps({"txids": [txid]}, separators=COMPACT_JSON_SEPARATORS))
 
 
 def _rpc_from_automation_args(args: argparse.Namespace, automation_endpoint: str, automation_wallet: str | None) -> DigiByteRPC:
@@ -543,6 +758,28 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
         print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 
 
+def cmd_send_sequence(args: argparse.Namespace) -> None:
+    amounts = _parse_amounts_csv(args.amounts)
+    fee = _parse_decimal(args.fee, "--fee")
+    op_returns = _parse_op_return_args(args.op_return_hex, args.op_return_ascii, len(amounts))
+    rpc = DigiByteRPC.from_env()
+    plan = plan_explicit_pattern(
+        rpc,
+        to_address=args.to_address,
+        amounts=amounts,
+        fee=fee,
+        min_confirmations=args.min_confirmations,
+    )
+    is_dry_run = getattr(args, "dry_run", False) or args.command == "plan-sequence"
+    if is_dry_run:
+        _print_sequence_summary(plan, op_returns)
+        print(json.dumps(plan.to_jsonable(), indent=2))
+        return
+    builder = TransactionBuilder(rpc)
+    txids = _execute_sequence_plan(builder, plan, op_returns)
+    print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+
+
 def _print_chain_summary(plan: PlannedChain) -> None:
     """Emit a human-readable list of the transactions in a chained plan."""
 
@@ -574,6 +811,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_plan_pattern(args)
         elif args.command == "plan-chain":
             cmd_plan_chain(args)
+        elif args.command in {"send-sequence", "plan-sequence"}:
+            cmd_send_sequence(args)
         else:  # pragma: no cover - argparse enforces choices
             raise CLIError(f"Unknown command: {args.command}")
     except KeyboardInterrupt:  # pragma: no cover - interactive use
