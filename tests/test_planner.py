@@ -65,6 +65,17 @@ class DummyRPC:
         return txid
 
 
+class AdvancingRPC(DummyRPC):
+    def __init__(self, start_height: int = 95) -> None:
+        super().__init__()
+        self.height = start_height
+
+    def getblockcount(self) -> int:  # type: ignore[override]
+        current = self.height
+        self.height += 1
+        return current
+
+
 class StubBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[list[dict[str, int]], dict[str, float], list[str] | None, float]] = []
@@ -154,6 +165,24 @@ def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: Automa
     inputs, outputs = rpc.last_tx
     assert len(inputs) == symbol.inputs
     assert len(outputs) == symbol.outputs
+
+
+def test_symbol_plan_explicit_block_target(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
+    rpc = DummyRPC()
+    planner = SymbolPlanner(rpc, automation)
+    with pytest.raises(PlanningError):
+        planner.plan(symbol, block_target=100)
+
+
+def test_symbol_broadcast_waits_for_block_target(
+    automation: AutomationMetadata, symbol: AutomationSymbol
+) -> None:
+    rpc = AdvancingRPC(start_height=95)
+    planner = SymbolPlanner(rpc, automation)
+    plan = planner.plan(symbol, block_target=99)
+    txid = planner.broadcast(plan, poll_seconds=0)
+    assert txid in rpc.sent_txids
+    assert rpc.height >= 99
 
 
 def test_symbol_planner_requires_change_for_cardinality(automation: AutomationMetadata) -> None:

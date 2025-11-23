@@ -65,6 +65,8 @@ Common planner flags:
 - `--wait-between-txs` – poll cadence / pacing delay between frames.
 - `--max-wait-seconds` – abort threshold for confirmation waits.
 - `--fee` – override dialect fee punctuation (where supported).
+- `--block-target` – optional absolute block height to celebrate or align with;
+  broadcasting waits until the chain is within the configured drift window.
 
 ## 5. Typical workflow: dry-run → broadcast
 

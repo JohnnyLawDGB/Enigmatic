@@ -176,6 +176,7 @@ class SymbolPlan:
     change_amount: Decimal
     fee: Decimal
     block_target: int | None
+    enforce_block_target: bool = False
     script_plane: ScriptPlane | None = None
 
     def to_jsonable(self) -> Dict[str, Any]:
@@ -187,6 +188,7 @@ class SymbolPlan:
             "outputs": {addr: str(amount) for addr, amount in self.outputs.items()},
             "change": str(self.change_amount.quantize(EIGHT_DP)),
             "block_target": self.block_target,
+            "enforce_block_target": self.enforce_block_target,
             "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
@@ -286,12 +288,16 @@ class PlannedChain:
     to_address: str
     transactions: List[PlannedTx]
     initial_utxos: List[PatternInput]
+    block_target: int | None = None
+    enforce_block_target: bool = False
 
     def to_jsonable(self) -> Dict[str, Any]:
         return {
             "to_address": self.to_address,
             "transactions": [tx.to_jsonable(index) for index, tx in enumerate(self.transactions)],
             "initial_utxos": [entry.to_jsonable() for entry in self.initial_utxos],
+            "block_target": self.block_target,
+            "enforce_block_target": self.enforce_block_target,
         }
 
     def as_pattern_sequence(self) -> PatternPlanSequence:
@@ -317,9 +323,21 @@ class SymbolPlanner:
         self.rpc = rpc
         self.automation = automation
 
-    def plan(self, symbol: AutomationSymbol, receiver: str | None = None) -> SymbolPlan:
+    def plan(
+        self,
+        symbol: AutomationSymbol,
+        receiver: str | None = None,
+        *,
+        block_target: int | None = None,
+        enforce_block_target: bool = False,
+    ) -> SymbolPlan:
         current_height = self.rpc.getblockcount()
-        block_target = current_height + symbol.delta if symbol.delta > 0 else None
+        if block_target is not None:
+            if block_target <= current_height:
+                raise PlanningError("Block target must be greater than the current height")
+            enforce_block_target = True
+        else:
+            block_target = current_height + symbol.delta if symbol.delta > 0 else None
         utxos = self.rpc.listunspent(self.automation.min_confirmations)
         selected, total = self._select_utxos(utxos, symbol.inputs, symbol.value + symbol.fee)
         script_plane = symbol.script_plane
@@ -345,6 +363,7 @@ class SymbolPlanner:
             change_amount=change_amount,
             fee=symbol.fee,
             block_target=block_target,
+            enforce_block_target=enforce_block_target,
             script_plane=script_plane,
         )
 
@@ -355,6 +374,8 @@ class SymbolPlanner:
         receiver: str | None = None,
         max_frames: int | None = None,
         min_confirmations: int | None = None,
+        block_target: int | None = None,
+        enforce_block_target: bool = False,
     ) -> PlannedChain:
         """Plan a chained representation of a symbol using its declared frames."""
         frames = symbol.chained_frames()
@@ -380,6 +401,10 @@ class SymbolPlanner:
         required_inputs = normalized_frames[0].inputs or symbol.inputs
         if required_inputs <= 0:
             raise PlanningError("Chained plan requires at least one input in the first frame")
+        if block_target is not None and block_target <= self.rpc.getblockcount():
+            raise PlanningError("Block target must be greater than the current height")
+        if block_target is not None:
+            enforce_block_target = True
         total_required = sum(frame.value + frame.fee for frame in normalized_frames)
         minconf = (
             min_confirmations
@@ -465,9 +490,41 @@ class SymbolPlanner:
             to_address=to_address,
             transactions=transactions,
             initial_utxos=funding_inputs,
+            block_target=block_target,
+            enforce_block_target=enforce_block_target,
         )
 
-    def broadcast(self, plan: SymbolPlan) -> str:
+    def _wait_for_block_target(
+        self,
+        block_target: int,
+        *,
+        progress_callback: ProgressCallback | None = None,
+        poll_seconds: float = 15.0,
+    ) -> None:
+        """Pause until the chain is within the scheduling window for the target block."""
+
+        drift = self.automation.max_drift_blocks
+        current_height = self.rpc.getblockcount()
+        if current_height > block_target + drift:
+            raise PlanningError(
+                f"Current height {current_height} exceeds drift window for target {block_target}"
+            )
+        while current_height < block_target - drift:
+            remaining = block_target - current_height
+            if progress_callback is not None:
+                progress_callback(
+                    f"Waiting for block {block_target} (current {current_height}, remaining {remaining})"
+                )
+            time.sleep(poll_seconds)
+            current_height = self.rpc.getblockcount()
+
+    def broadcast(
+        self, plan: SymbolPlan, *, poll_seconds: float = 15.0, progress_callback: ProgressCallback | None = None
+    ) -> str:
+        if plan.enforce_block_target and plan.block_target is not None:
+            self._wait_for_block_target(
+                plan.block_target, progress_callback=progress_callback, poll_seconds=poll_seconds
+            )
         outputs_json = {addr: float(amount) for addr, amount in plan.outputs.items()}
         raw_hex = self.rpc.createrawtransaction(plan.inputs, outputs_json)
         signed = self.rpc.signrawtransactionwithwallet(raw_hex)
@@ -484,9 +541,14 @@ class SymbolPlanner:
         max_wait_seconds: float | None = None,
         progress_callback: ProgressCallback | None = None,
         builder: TransactionBuilder | None = None,
+        poll_seconds: float = 15.0,
     ) -> list[str]:
         """Broadcast each transaction in a chained plan sequentially."""
 
+        if plan.enforce_block_target and plan.block_target is not None:
+            self._wait_for_block_target(
+                plan.block_target, progress_callback=progress_callback, poll_seconds=poll_seconds
+            )
         pattern_sequence = plan.as_pattern_sequence()
         return broadcast_pattern_plan(
             self.rpc,
