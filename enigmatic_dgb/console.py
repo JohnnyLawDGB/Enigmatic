@@ -11,12 +11,13 @@ import traceback
 from typing import List, Sequence
 
 from . import cli
+from .dialect import DialectError, load_dialect
 from .model import EncodingConfig
 from .rpc_client import DigiByteRPC, RPCError
 from .watcher import Watcher
 
 DEFAULT_FEE = 0.21
-DEFAULT_DIALECT = "examples/dialect-heartbeat.yaml"
+DEFAULT_DIALECT = "examples/dialect-showcase.yaml"
 
 
 def prompt_str(prompt: str, default: str | None = None) -> str:
@@ -144,6 +145,8 @@ def handle_quickstart() -> None:
 def handle_dialect_symbols() -> None:
     """Plan or send a symbol defined by a dialect file."""
 
+    current_dialect_path = DEFAULT_DIALECT
+
     while True:
         print(
             textwrap.dedent(
@@ -151,6 +154,7 @@ def handle_dialect_symbols() -> None:
                 Dialect-driven symbols
                 [1] Plan symbol (plan-symbol)
                 [2] Send symbol (send-symbol)
+                [L] List symbols in a dialect
                 [B] Back
                 """
             )
@@ -158,12 +162,20 @@ def handle_dialect_symbols() -> None:
         choice = input("Select an option: ").strip().lower()
         if choice in {"b", "0"}:
             return
+        if choice == "l":
+            dialect_path = prompt_str(
+                "Dialect YAML path", default=current_dialect_path
+            )
+            current_dialect_path = dialect_path
+            _list_dialect_symbols(dialect_path)
+            continue
         if choice not in {"1", "2"}:
             print("Invalid selection, please try again.\n")
             continue
 
-        dialect_path = prompt_str("Dialect YAML path", default=DEFAULT_DIALECT)
-        symbol = prompt_str("Symbol name")
+        dialect_path = prompt_str("Dialect YAML path", default=current_dialect_path)
+        current_dialect_path = dialect_path
+        symbol = prompt_str("Symbol name (use [L] to list)")
         to_address = None
         if choice == "2":
             to_address = prompt_str("Destination address")
@@ -199,6 +211,31 @@ def handle_dialect_symbols() -> None:
         code = run_enigmatic_cli(args)
         print(f"Command finished with exit code {code}\n")
         _pause()
+
+
+def _list_dialect_symbols(dialect_path: str) -> None:
+    """Load a dialect and print available symbols with descriptions."""
+
+    try:
+        dialect = load_dialect(dialect_path)
+    except DialectError as exc:
+        if _should_debug():
+            traceback.print_exc()
+        print(f"Failed to load dialect: {exc}")
+        _pause()
+        return
+
+    print(
+        textwrap.dedent(
+            f"""
+            Symbols available in {dialect.name} ({dialect_path}):
+            Fee punctuation: {dialect.fee_punctuation}
+            """
+        )
+    )
+    for name, symbol in sorted(dialect.symbols.items()):
+        print(f"  - {name}: {symbol.description}")
+    _pause()
 
 
 def handle_numeric_sequences() -> None:
