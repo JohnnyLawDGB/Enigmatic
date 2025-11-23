@@ -23,7 +23,54 @@ The project combines:
 - Replayable dialects and decoded walkthroughs in [`../examples/`](../examples)
   plus reproducible RPC experiments in [`rpc_test_plan.md`](rpc_test_plan.md).
 
-## 2. Architecture Overview
+## 2. Historical Lineage: Steganography, Enigma, and Blockchain Signalling
+
+### 2.1 Ancient ink and shaved heads
+
+Steganography hides the **existence** of a message, while cryptography hides
+its **meaning**. A classic example from Herodotus recounts Histiaeus having a
+message tattooed onto a servant’s shaved scalp; only after the hair regrew was
+the courier dispatched, and the recipient revealed the hidden text by shaving
+the head again. Other early tactics—ink under wax tablets, invisible ink on
+letters, and later microdots—show how ordinary objects can carry covert
+structure.
+
+### 2.2 Enigma and the birth of modern codebreaking
+
+The World War II **Enigma** machine was a German electro-mechanical cipher
+device whose rotor and plugboard settings scrambled radio traffic into
+apparently meaningless character streams. Polish cryptanalysts opened the door
+before the war, and British teams at Bletchley Park (including Alan Turing)
+scaled the effort with “bombes” and crib-driven searches. Breaking Enigma is
+credited with shortening the war by years. **Enigmatic** nods to this heritage:
+we are not re-implementing Enigma, but we draw inspiration from mathematically
+structured signalling that rides atop “ordinary” traffic. Our goal is
+ledger-native signals whose state vectors look like normal DigiByte activity
+unless you possess the dialect to decode the symbols and frames.
+
+### 2.3 Whispers in the blockchain
+
+As media turned digital, steganography moved into pixels and audio samples, and
+ARGs/CTFs like Cicada 3301 layered clues across files and QR codes. Blockchains
+extended the tradition: Satoshi Nakamoto embedded “The Times 03/Jan/2009
+Chancellor on brink of second bailout for banks” in Bitcoin’s genesis block as
+both timestamp and commentary. Users later leaned on OP_RETURN and structured
+transaction patterns to place poems, keys, coordinates, and puzzle trails
+on-chain.
+
+### 2.4 How this frames Enigmatic
+
+Enigmatic threads these stories together: classical steganography shows that
+“you only notice the message if you know where to look”; Enigma illustrates
+mathematically rich signalling over mundane channels; blockchain puzzles prove
+ledgers can carry layered meaning. Enigmatic generalizes this for DigiByte by
+using state planes—value, fee punctuation, cardinality symmetry, topology, and
+block-placement cadence—as the signalling medium. Casual observers see valid,
+economical transactions; holders of the dialect interpret structured symbols
+and frames. The aim is not to romanticize spycraft, but to continue the long
+tradition of communicating in plain sight with rigor and plausible deniability.
+
+## 3. Architecture Overview
 
 - **Protocol layer** – Defines the message space \(\mathcal{M}\), state planes,
   and dialect composition (see `../specs/01-protocol-overview.md` and
@@ -40,7 +87,7 @@ The project combines:
 
 <!-- TODO: insert block-placement timing diagram showing Δheight coordination across frames -->
 
-## 3. Formal Model & State Planes
+## 4. Formal Model & State Planes
 
 The state vector for a transaction \(t\) is
 \(\mathbf{s}(t) = (v, f, m, n, \tau, \sigma, a)\), where:
@@ -60,7 +107,7 @@ orthogonality between planes, and decoder completeness live in
 
 <!-- TODO: add lemma/proof sketch illustrating orthogonality of planes for multi-channel multiplexing -->
 
-## 4. Encoding Process & Dialects
+## 5. Encoding Process & Dialects
 
 - Dialects (`../specs/06-dialects.md`) map **symbols** to one or more **frames**
   (transactions) by declaring constraints on each state plane.
@@ -76,7 +123,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 
 <!-- TODO: insert dialect lifecycle diagram (draft → dry-run → broadcast) -->
 
-## 5. Decoding & Observability
+## 6. Decoding & Observability
 
 - `decoder.py` and `watcher.py` reconstruct state vectors from raw transactions
   and chain them into frames using block placement and change-linking
@@ -88,7 +135,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 
 <!-- TODO: add detection playbook diagram showing sliding-window fee/height analysis -->
 
-## 6. Use Cases
+## 7. Use Cases
 
 - **Presence and identity beacons** – Heartbeats and HELLO/PRESENCE frames from
   `dialect-heartbeat.yaml` and `dialect-intel.yaml` (replayable via CLI).
@@ -99,7 +146,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 - **Covert session bootstrap** – Optional payload encryption plus OP_RETURN
   commitments to coordinate shared secrets before higher-layer messaging.
 
-## 7. Security, Deniability, and Detection
+## 8. Security, Deniability, and Detection
 
 - **Plausible deniability** – Transactions remain economically rational; fee and
   value choices stay within normal wallet behavior. See
@@ -111,7 +158,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
   Δheight expectations, enabling pre-broadcast audits. TODO: formalize the
   indistinguishability bounds for fee jitter.
 
-## 8. Implementation Status (Repository Alignment)
+## 9. Implementation Status (Repository Alignment)
 
 - Specs chapters 01–06 define the planes, model, encoding/decoding processes,
   dialects, and security assumptions.
@@ -123,7 +170,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 - Examples in `../examples/` include dialect YAML files, decoded traces, and
   walkthroughs that can be reproduced with the RPC test plan.
 
-## 9. Planned Enhancements
+## 10. Planned Enhancements
 
 Roadmap items tracked in [`expansion-roadmap.md`](expansion-roadmap.md):
 
