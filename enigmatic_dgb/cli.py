@@ -74,6 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Enigmatic DigiByte CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser(
+        "console", help="Launch the interactive Enigmatic console (ASCII menu UI)",
+    )
+
     send_parser = subparsers.add_parser(
         "send-message", help="encode a message and broadcast the spend pattern"
     )
@@ -1055,7 +1059,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "send-message":
+        if args.command == "console":
+            from .console import console_main
+
+            console_main()
+        elif args.command == "send-message":
             cmd_send_message(args)
         elif args.command == "watch":
             cmd_watch(args)
