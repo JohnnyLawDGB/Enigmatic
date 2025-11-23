@@ -113,6 +113,14 @@ Replayable assets live in `examples/`:
   symbols via `watcher.py`.
 - `examples/README.md` indexes additional motifs and decoded traces.
 
+### Showcase dialect (console-friendly)
+
+- `examples/dialect-showcase.yaml` ships curated, safe sample payloads you can
+  load directly from the console’s "Dialect-driven symbols" menu. Symbols
+  include `genesis_bitcoin_2009`, `genesis_digibyte_2014`, `halving_cycle`,
+  `triptych_21_21_84`, `digishield_pulse`, `digiswarm_burst`,
+  `digidollar_steady`, and `hello_enigmatic`.
+
 Use `enigmatic-dgb plan-symbol --dialect-path examples/dialect-heartbeat.yaml --symbol HEARTBEAT --dry-run`
 to inspect a state vector before broadcasting it.
 

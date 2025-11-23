@@ -9,8 +9,9 @@ how theory looks when rendered into DigiByte transactions.
 | ---- | ----------- |
 | `dialect-heartbeat.yaml` | Minimal heartbeat cadence used in README walkthroughs. Good for smoke-testing RPC flows. |
 | `dialect-intel.yaml` | Replays the INTEL-style tri-anchor exchange described in the live experiments section. |
+| `dialect-showcase.yaml` | Curated demo dialect with DigiByte-flavored sample symbols ready for console selection. |
 
-Both dialects can be fed into `scripts/enigmatic_rpc.py` via `--dialect` to plan
+These dialects can be fed into `scripts/enigmatic_rpc.py` via `--dialect` to plan
 or broadcast state vectors.
 
 ## Narrative walkthroughs

@@ -1,0 +1,74 @@
+# Showcase / demo dialect for DigiByte
+# Curated sample symbols for console exploration and testing.
+name: showcase
+version: 0.1.0
+description: >-
+  Showcase / demo dialect for DigiByte with curated, ready-to-use symbols that
+  nod to blockchain history, DigiByte tech (DigiShield, DigiSwarm, DigiDollar),
+  and familiar numerology (21 / 21 / 84) using small, test-friendly amounts.
+fee_punctuation: 0.21
+symbols:
+  genesis_bitcoin_2009:
+    description: Nods to the Bitcoin genesis block on 2009-01-03 with 20.09 / 1.03 anchors and a tiny 0.003 micro echo.
+    intent: history
+    anchors: [20.09, 1.03]
+    micros: [0.003]
+    metadata:
+      tags: [bitcoin, genesis, history]
+      note: "Reflects 2009-01-03 in value and micro punctuation."
+  genesis_digibyte_2014:
+    description: Celebrates the DigiByte genesis on 2014-01-10 using 20.14 / 1.10 anchors and a 0.014 micro shard.
+    intent: history
+    anchors: [20.14, 1.10]
+    micros: [0.014]
+    metadata:
+      tags: [digibyte, genesis, history]
+      note: "Encodes 2014-01-10 with scaled anchors and micro punctuation."
+  halving_cycle:
+    description: Represents a shrinking emission curve with a 4-step reward staircase (5 → 2.5 → 1.25 → 0.625) and a 0.03125 micro tail.
+    intent: emission
+    anchors: [5.0, 2.5, 1.25, 0.625]
+    micros: [0.03125]
+    metadata:
+      tags: [halving, emission, rewards]
+      note: "Scaled-down halving staircase to keep values test-friendly."
+  triptych_21_21_84:
+    description: 21 / 21 / 84 numerology pattern scaled for DGB (2.1, 2.1, 8.4) with an 0.084 micro hint at the LTC cap ratio.
+    intent: numerology
+    anchors: [2.1, 2.1, 8.4]
+    micros: [0.084]
+    metadata:
+      tags: [supply, numerology]
+      note: "Keeps the 21/21/84 proportions while keeping amounts lightweight."
+  digishield_pulse:
+    description: Evokes DigiShield’s fast difficulty response with bounded pulses (0.21 → 0.14 → 0.07 → 0.21) plus a 0.005 jitter micro.
+    intent: resilience
+    anchors: [0.21, 0.14, 0.07, 0.21]
+    micros: [0.005]
+    metadata:
+      tags: [digibyte, digishield]
+      note: "Tight pulses to mirror quick difficulty adjustments."
+  digiswarm_burst:
+    description: Swarm/fan-out burst: one anchor and five tiny micro shards to mimic many-output behavior without hard-coded addresses.
+    intent: swarm
+    anchors: [0.11]
+    micros: [0.011, 0.011, 0.011, 0.011, 0.011]
+    metadata:
+      tags: [digibyte, swarm]
+      note: "Micro shards encourage higher output count when constructing frames."
+  digidollar_steady:
+    description: Steady, dollar-like heartbeat with repeated 1.00 anchors and paired 0.10 micros to emphasize stability.
+    intent: stability
+    anchors: [1.0, 1.0, 1.0]
+    micros: [0.10, 0.10]
+    metadata:
+      tags: [digidollar, stability]
+      note: "Flat line cadence for calm, predictable signaling."
+  hello_enigmatic:
+    description: Beginner-friendly hello-world with a 0.21 anchor and two small micros for easy visual recognition.
+    intent: greeting
+    anchors: [0.21]
+    micros: [0.021, 0.014]
+    metadata:
+      tags: [hello, onboarding]
+      note: "Tiny amounts make this safe for quick console experiments."
