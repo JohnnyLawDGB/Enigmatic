@@ -254,6 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Broadcast the plan after inspection",
     )
     planner_parser.add_argument(
+        "--block-target",
+        type=int,
+        help="Explicit block height target for the transaction",
+    )
+    planner_parser.add_argument(
         "--as-chain",
         action="store_true",
         help="Plan the symbol as a chained message using the dialect frames",
@@ -387,6 +392,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-frames",
         type=int,
         help="Limit the number of frames included in the chain",
+    )
+    chain_parser.add_argument(
+        "--block-target",
+        type=int,
+        help="Explicit block height target for the first transaction in the chain",
     )
     chain_mode = chain_parser.add_mutually_exclusive_group()
     chain_mode.add_argument(
@@ -910,13 +920,22 @@ def cmd_plan_symbol(args: argparse.Namespace) -> None:
     symbol = dialect.get_symbol(args.symbol)
     max_frames = _parse_max_frames(args.max_frames)
     if args.as_chain:
-        chain = planner.plan_chain(symbol, receiver=args.receiver_address, max_frames=max_frames)
+        chain = planner.plan_chain(
+            symbol,
+            receiver=args.receiver_address,
+            max_frames=max_frames,
+            block_target=args.block_target,
+        )
         print(json.dumps(chain.to_jsonable(), indent=2))
         if args.broadcast:
             txids = planner.broadcast_chain(chain)
             print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
     else:
-        plan = planner.plan(symbol, receiver=args.receiver_address)
+        plan = planner.plan(
+            symbol,
+            receiver=args.receiver_address,
+            block_target=args.block_target,
+        )
         print(json.dumps(plan.to_jsonable(), indent=2))
         if args.broadcast:
             txid = planner.broadcast(plan)
@@ -960,6 +979,7 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
         receiver=args.to_address,
         max_frames=max_frames,
         min_confirmations=args.min_confirmations,
+        block_target=args.block_target,
     )
     _print_chain_summary(chain)
     print(json.dumps(chain.to_jsonable(), indent=2))
