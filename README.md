@@ -89,6 +89,16 @@ credentials are shared across commands via environment variables or CLI
 overrides. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for reproducible
 on-chain experiments.
 
+## History & Inspiration
+
+Enigmatic sits in a long line of “messages hidden in plain sight”: from
+Histiaeus’ scalp-tattoo courier, to Enigma traffic that sounded ordinary but was
+mathematically scrambled, to Bitcoin’s genesis block embedding “The Times
+03/Jan/2009 Chancellor on brink of second bailout for banks.” The name nods to
+Enigma and the broader tradition of structured signalling over common channels,
+with DigiByte state planes as the medium. Read the full lineage in
+[`docs/whitepaper.md`](docs/whitepaper.md#2-historical-lineage-steganography-enigma-and-blockchain-signalling).
+
 ## Architecture Snapshot
 
 The reference stack keeps the formal model executable:
