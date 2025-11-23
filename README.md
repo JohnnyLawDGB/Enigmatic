@@ -45,12 +45,20 @@ cd Enigmatic
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 
-# Verify the CLI is available
+# Start with the ASCII console to explore tools and menus
+enigmatic-dgb console
+
+# Verify the CLI is available outside the console
 enigmatic-dgb --help
 
 # Run unit tests (optional for docs-only edits)
 pytest
 ```
+
+The ASCII console defaults to **dry-run/testing mode** for planner and sender
+flows so you can review the planned state vector for each command before
+issuing a broadcast flag. Outside the console, use `--dry-run` with
+`plan-*`/`send-*` commands to mirror the same guardrail.
 
 ## Repository Layout
 
