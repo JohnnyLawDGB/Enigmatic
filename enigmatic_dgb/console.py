@@ -13,7 +13,7 @@ from typing import List, Sequence
 from . import cli
 from .dialect import DialectError, load_dialect
 from .model import EncodingConfig
-from .rpc_client import DigiByteRPC, RPCError
+from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
 from .watcher import Watcher
 
 DEFAULT_FEE = 0.21
@@ -554,11 +554,32 @@ def handle_help() -> None:
     _pause()
 
 
+def _get_block_height() -> int | None:
+    """Fetch the current block height via RPC, returning None on error."""
+
+    try:
+        rpc = DigiByteRPC.from_env()
+        return rpc.getblockcount()
+    except (ConfigurationError, RPCError, Exception):  # pragma: no cover - RPC plumbing
+        if _should_debug():
+            traceback.print_exc()
+        return None
+
+
 def _render_menu() -> None:
+    block_height = _get_block_height()
+
+    block_line = (
+        f"Current block height: {block_height}"
+        if block_height is not None
+        else "Block height: unavailable (RPC)"
+    )
+
     print(
         "=" * 37
         + "\nEnigmatic Console (DigiByte Layer-0)\n"
         + "=" * 37
+        + f"\n{block_line}\n"
         + textwrap.dedent(
             """
 
