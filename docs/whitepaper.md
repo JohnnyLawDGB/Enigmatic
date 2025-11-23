@@ -1,109 +1,136 @@
-# Enigmatic — A Layer-0 Communication Protocol  
+# Enigmatic — A Layer-0 Communication Protocol
 **DigiByte-Optimized Edition**
 
-> This Markdown file mirrors the structure of the IEEE-style PDF whitepaper and
-> serves as the canonical, Git-friendly version of the specification text.
+> This Markdown mirrors the evolving IEEE-style PDF and stays aligned with the
+> repository’s specs, tooling, and examples. TODO markers indicate where
+> diagrams and formal proofs will be added before publication.
 
 ## 1. Introduction
 
-Enigmatic is a Layer-0, chain-native communication protocol that encodes
-structured messages into DigiByte transactions without requiring any change to
-consensus rules.
+Enigmatic is a Layer-0 communication protocol that treats DigiByte transactions
+as **state vectors** across multiple planes (value, fee, cardinality, topology,
+block placement, and optional auxiliary metadata). Under an agreed **dialect**,
+the joint distribution of these planes expresses **symbols** and multi-frame
+messages without changing DigiByte consensus rules or wallet semantics.
 
-Transactions remain valid and economically meaningful, but when interpreted
-under the Enigmatic ruleset, they also form a **steganographic message stream**.
+The project combines:
 
-The project ships with three coordinated pillars that keep the theory and the
-implementation in lockstep:
+- Formal specifications in [`../specs/`](../specs) describing each state plane
+  and the encoding/decoding functions.
+- A reference Python stack in [`../enigmatic_dgb/`](../enigmatic_dgb) that keeps
+  the encoder, planner, transaction builder, watcher, and CLI aligned with the
+  specs.
+- Replayable dialects and decoded walkthroughs in [`../examples/`](../examples)
+  plus reproducible RPC experiments in [`rpc_test_plan.md`](rpc_test_plan.md).
 
-1. **Protocol specifications** in `../specs/` describe the state planes (value,
-   fee, cardinality, topology, block placement, auxiliary metadata) and the
-   deterministic mapping between state vectors and intents.
-2. **Reference tooling** in `../enigmatic_dgb/` exposes the encoder, decoder,
-   planner, RPC utilities, and CLI so that reproducible transactions can be
-   generated directly from the documented primitives.
-3. **Dial tone examples and lab notebooks** in `../examples/` and
-   `../docs/rpc_test_plan.md` demonstrate how real DigiByte transactions exhibit
-   the motifs described in the specs.
+## 2. Architecture Overview
 
-This whitepaper mirrors the content in [`README.md`](../README.md) and
-`docs/ARCHITECTURE.md` so contributors can trust that every workflow described
-here exists in the repository.
+- **Protocol layer** – Defines the message space \(\mathcal{M}\), state planes,
+  and dialect composition (see `../specs/01-protocol-overview.md` and
+  `../specs/02-encoding-primitives.md`).
+- **Encoding/decoding logic** – Maps intents to state vectors via
+  \(\mathcal{E}(M) \rightarrow t\) and reconstructs intents via
+  \(\mathcal{D}(t) \rightarrow M'\) (`../specs/03-formal-model.md`).
+- **Reference implementation** – `planner.py`, `tx_builder.py`, `encoder.py`,
+  `decoder.py`, and `watcher.py` ensure every state plane is executable and
+  testable (`tests/`).
+- **Tooling surface** – `enigmatic_dgb/cli.py` provides `plan-symbol`,
+  `plan-chain`, `plan-sequence`, `send-symbol`, `send-message`, and watcher
+  commands for both dry-run and broadcast workflows.
 
+<!-- TODO: insert block-placement timing diagram showing Δheight coordination across frames -->
 
-## 2. Background and Design Rationale
+## 3. Formal Model & State Planes
 
-- **DigiByte UTXO model.** UTXO selection provides discrete, inspectable
-  components that can be repurposed as state variables. Enigmatic leans on
-  deterministic coin control to express repetition, symmetry, and anchoring via
-  the transaction graph.
-- **Value precision and dust thresholds.** The fee punctuation (`0.21`,
-  `0.152`, etc.) referenced in the README comes from DigiByte's high-precision
-  outputs and generous dust threshold, allowing encoded values to remain
-  economically sane while still conveying beacons.
-- **Block cadence and multi-algo mining.** Average block intervals plus the
-  randomness introduced by five mining algorithms create enough timing entropy
-  to place heartbeats across the block height plane without requiring explicit
-  wall-clock synchronization.
+The state vector for a transaction \(t\) is
+\(\mathbf{s}(t) = (v, f, m, n, \tau, \sigma, a)\), where:
 
-Together these properties make DigiByte an ideal substrate for the state plane
-approach that Enigmatic formalizes in `../specs/02-encoding-primitives.md` and
-`../specs/03-formal-model.md`.
+- \(v\): value plane anchors and repetition headers.
+- \(f\): fee punctuation / jitter bands.
+- \(m, n\): input/output cardinalities (and symmetry across them).
+- \(\tau\): topology motifs and ordering windows.
+- \(\sigma\): block-placement cadence (height deltas, repetition across frames).
+- \(a\): auxiliary metadata (OP_RETURN or commitments when present).
 
-## 3. Formal Model
+Encoding deterministically maps an intent to \(\mathbf{s}(t)\), and decoding
+reconstructs intents from observed planes. The proofs of determinism,
+orthogonality between planes, and decoder completeness live in
+[`../specs/03-formal-model.md`](../specs/03-formal-model.md) and
+[`../specs/04-encoding-process.md`](../specs/04-encoding-process.md).
 
-The whitepaper follows the same structure as the spec chapter:
+<!-- TODO: add lemma/proof sketch illustrating orthogonality of planes for multi-channel multiplexing -->
 
-1. Define the message space \\\( \mathcal{M} \\\) and the state vector components.
-2. Introduce the encoding function \\\( \mathcal{E}(M) \rightarrow t \\\) which maps intents to
-   concrete DigiByte transactions by selecting amounts, fees, and topology
-   constraints.
-3. Describe the decoding function \\\( \mathcal{D}(t) \rightarrow M' \\\) which recovers
-   intents from ledger observations by inspecting all state planes.
+## 4. Encoding Process & Dialects
 
-Readers who want the formal notation, invariants, and proofs should jump to
-[`../specs/03-formal-model.md`](../specs/03-formal-model.md), while this document
-maintains a narrative explanation that mirrors the README quick references.
+- Dialects (`../specs/06-dialects.md`) map **symbols** to one or more **frames**
+  (transactions) by declaring constraints on each state plane.
+- `planner.py` resolves those constraints into concrete UTXO selections and
+  change choreography, preserving input/output symmetry and dust compliance.
+- `tx_builder.py` realizes the frame with deterministic output ordering and
+  optional OP_RETURN hints.
+- `plan-symbol`, `plan-chain`, and `plan-pattern` expose dry-run views so
+  auditors can diff the planned state vector before a broadcast.
 
-## 4. Reference Stack and Tooling
+Dialect authors iterate on YAML files in `../examples/` using the planner to
+validate fee punctuation, block spacing, and cardinality before any funds move.
 
-Every section of the README has a direct tooling counterpart:
+<!-- TODO: insert dialect lifecycle diagram (draft → dry-run → broadcast) -->
 
-- `enigmatic_dgb/cli.py` exposes `enigmatic-dgb` commands such as
-  `plan-symbol`, `plan-chain`, `plan-pattern`, and `send-sequence`. Each command
-  accepts the planner arguments and confirmation guards documented in the
-  README's "Unified CLI Workflows" section.
-- `enigmatic_dgb/planner.py`, `enigmatic_dgb/tx_builder.py`, and
-  `enigmatic_dgb/rpc_client.py` keep UTXO selection, change choreography, and
-  RPC interactions deterministic across dry runs and broadcasts. The
-  whitepaper's state plane discussion is therefore testable via `pytest` and the
-  examples.
-- `enigmatic_dgb/decoder.py` and `enigmatic_dgb/watcher.py` supply the telemetry
-  decoders referenced in `examples/example-decoding-flow.md`, proving that the
-  transaction motifs shown in the paper can be observed directly from the
-  blockchain.
+## 5. Decoding & Observability
 
-`docs/rpc_test_plan.md` documents the precise CLI commands and RPC assumptions
-used during live dial tone tests so reviewers can reproduce the sequences cited
-in the narrative.
+- `decoder.py` and `watcher.py` reconstruct state vectors from raw transactions
+  and chain them into frames using block placement and change-linking
+  heuristics.
+- `enigmatic-dgb watch` streams decoded packets for a target address; decoded
+  flows in `../examples/example-decoding-flow.md` mirror these mechanics.
+- Detection heuristics (fee band clustering, symmetry scores, Δheight cadence)
+  are catalogued in [`../specs/05-decoding-process.md`](../specs/05-decoding-process.md).
 
-## 5. Documentation Alignment
+<!-- TODO: add detection playbook diagram showing sliding-window fee/height analysis -->
 
-- [`README.md`](../README.md) introduces the state plane framing, quickstart, and
-  CLI workflows. Each table and example links to the corresponding spec chapter
-  or example dialect.
-- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) zooms into the same modules listed
-  above, ensuring that engineers jumping in from the whitepaper can find the
-  correct implementation file.
-- [`docs/README.md`](README.md) and the files under `../specs/` define the
-  eight-part specification that this paper references section-by-section.
-- [`examples/README.md`](../examples/README.md) keeps the chain of custody
-  between dial tone YAML files, CLI invocations, and decoded interpretations so
-  the lab exercises in this whitepaper stay verifiable.
+## 6. Use Cases
 
-Maintaining this alignment ensures the README, specs, and whitepaper reinforce
-one another: the README gives quick starts, the specs provide rigor, and the
-whitepaper ties both to the available tools.
+- **Presence and identity beacons** – Heartbeats and HELLO/PRESENCE frames from
+  `dialect-heartbeat.yaml` and `dialect-intel.yaml` (replayable via CLI).
+- **Operational telemetry** – Multi-frame chains with deterministic fees and
+  block-spacing for pipeline checkpoints.
+- **Swarm negotiation** – Symmetric cardinality/topology patterns indicating
+  quorum formation or consensus-ready states.
+- **Covert session bootstrap** – Optional payload encryption plus OP_RETURN
+  commitments to coordinate shared secrets before higher-layer messaging.
 
----
+## 7. Security, Deniability, and Detection
 
+- **Plausible deniability** – Transactions remain economically rational; fee and
+  value choices stay within normal wallet behavior. See
+  [`../specs/06-security-model.md`](../specs/06-security-model.md).
+- **Adversary model** – Observers may attempt state-plane fingerprinting
+  (fee/value band detection, symmetry scoring). Mitigations include jitter bands
+  and dialect rotation.
+- **Verification surface** – Dry-run planners emit the exact inputs/outputs and
+  Δheight expectations, enabling pre-broadcast audits. TODO: formalize the
+  indistinguishability bounds for fee jitter.
+
+## 8. Implementation Status (Repository Alignment)
+
+- Specs chapters 01–06 define the planes, model, encoding/decoding processes,
+  dialects, and security assumptions.
+- Python modules under `enigmatic_dgb/` implement the encoder, planner, builder,
+  and watcher used in the examples and tests.
+- CLI commands in `enigmatic_dgb/cli.py` expose `plan-symbol`, `plan-chain`,
+  `plan-sequence`, `send-symbol`, `send-message`, and watchers documented in
+  [`../docs/TOOLING.md`](TOOLING.md).
+- Examples in `../examples/` include dialect YAML files, decoded traces, and
+  walkthroughs that can be reproduced with the RPC test plan.
+
+## 9. Planned Enhancements
+
+Roadmap items tracked in [`expansion-roadmap.md`](expansion-roadmap.md):
+
+- Production-grade wallet/RPC integrations and hardware-wallet signing flows.
+- Multi-chain experiments while keeping DigiByte the reference substrate.
+- Community dialect registry with linting and replay fixtures.
+- Analytics and detection dashboards for state-plane observation.
+- Pattern detection frameworks for automated threat modeling.
+
+<!-- TODO: insert appendix with formal security proof outline and notation table -->

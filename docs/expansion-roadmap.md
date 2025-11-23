@@ -1,47 +1,47 @@
-# Expansion Roadmap Based on Multi-Plane State Encoding
+# What’s Next — Enigmatic Roadmap
 
-This roadmap ties the telemetry-style state variables (amount, timing, ordering, repetition, input size, output structure, fee invariance, block interval alignment, cluster symmetry) to concrete edits in the repository. Each subsection lists proposed expansions and the files / sections that should host them.
+This roadmap aligns upcoming work with the current implementation surface:
+`enigmatic_dgb/`, `specs/`, `docs/`, `examples/`, and `tests/`. Milestones are
+organized into near-term (current cycle) and mid-term (upcoming cycles) to keep
+the protocol, tooling, and documentation in lockstep.
 
-## 1. README.md — Multi-Plane Quick Reference
-- Add a **"State Planes"** table summarizing how amount, fee, cardinality, topology, and block placement act as orthogonal channels.
-- Include a short **"Telemetry vs. Cipher"** comparison that frames Enigmatic as state synchronization rather than substitution ciphers.
-- Provide links to relevant specs (e.g., Value plane → `specs/02-encoding-primitives.md`, Formal model → `specs/03-formal-model.md`).
+## Near-term (reference stack hardening)
 
-## 2. specs/02-encoding-primitives.md — Variable Mapping Enhancements
-- Extend §2.1–§2.5 with explicit mappings for the observed variables:
-  - **Timing** → add a new subsection on *block interval encoding* with examples like "∆height = 3 → heartbeat".
-  - **Ordering & repetition** → define canonical transaction ordering rules and repeated value motifs (e.g., alternating 11.11 / 7.00 headers) to signal consensus states.
-  - **Cluster symmetry** → document how mirrored input/output values encode swarm formations.
-- Introduce a table of **reserved dialect markers** that show how combinations across planes yield higher-level symbols (e.g., Value 21.21 + Fee 0.21 + m=n=21 → `FRAME_SYNC`).
+- **Wallet/RPC ergonomics**: Expand dialect-level RPC overrides, add clearer
+  error surfaces for missing wallets, and document hardware-wallet safe signing
+  flows (`docs/TOOLING.md`).
+- **Planner fidelity**: Surface block-placement expectations in `plan-*`
+  summaries, emit clearer change-linking visuals, and add regression tests for
+  chained frame reuse (`tests/`).
+- **Dialect registry scaffolding**: Publish a canonical index in
+  `examples/README.md`, plus linting for YAML structure and reserved plane
+  markers (`specs/06-dialects.md`).
+- **Detection playbooks**: Extend `specs/05-decoding-process.md` with sliding
+  window heuristics and add watcher examples that score fee bands and symmetry.
+- **Documentation parity**: Finalize whitepaper TODOs (timing diagrams,
+  orthogonality proof sketch) and keep README/tooling guides synchronized with
+  the CLI surface.
 
-## 3. specs/03-formal-model.md — State Vector Formalization
-- After Definition 3.2, add a **state vector definition**: \( \mathbf{s}(t) = (v, f, m, n, \Delta h, \sigma) \) capturing amount, fee, cardinality, block spacing, and symmetry flags.
-- Provide lemmas showing how orthogonality between vector components enables parallel message streams.
-- Add an example proof sketch for *multi-agent state synchronization* that references telemetry variables.
+## Mid-term (feature expansion)
 
-## 4. specs/04-encoding-process.md — Dialect-Aware Workflow
-- Flesh out Step 3 with a checklist that ties each variable to encoding decisions (e.g., choose `∆height` cadence before assigning fees).
-- Insert a new §4.4 **"Telemetry Dialects"** section describing how to build reusable configs for heartbeats, consensus proofs, and swarm negotiation.
-- Document automation hooks (YAML/JSON dialect files) that map raw messages into multi-plane targets.
+- **Production-grade wallet integrations**: Pluggable signers (hardware wallets,
+  PSBT flows) and retryable broadcast paths for chained frames.
+- **Multi-chain experiments**: Validate the state-plane approach on additional
+  UTXO chains while retaining DigiByte as the reference substrate; factor chain
+  abstractions into the planner where feasible.
+- **Community dialect registry**: Hosted index with replay fixtures, semantic
+  versioning, and automated `plan-symbol --dry-run` checks for submissions.
+- **Observability & analytics**: Dashboard-friendly watcher outputs, optional
+  metrics exporters, and pattern detection frameworks for threat modeling.
+- **Pattern detection research**: Formalize indistinguishability bounds for fee
+  jitter and block cadence; publish detection-resistance benchmarks alongside
+  example countermeasures.
 
-## 5. specs/05-decoding-process.md — Observer Playbooks
-- Add discovery heuristics for spotting telemetry streams: sliding-window fee band detection, symmetry scoring for clusters, and block-interval monitors.
-- Provide pseudo-code for reconstructing state vectors and validating timing / ordering constraints.
-- Include an appendix with a worked example that mirrors the README quick reference.
+## Adoption milestones
 
-## 6. specs/06-security-model.md & specs/section7.md — Detectability & Noise
-- Expand the adversary model with **state-plane fingerprinting** attempts (e.g., statistical detection of 21.21 headers) and mitigation guidance.
-- Describe how fee jitter (ε) and randomized ordering preserve indistinguishability without breaking decoder expectations.
-- Reconcile Section 6 (skeleton) with `specs/section7.md` by either merging or cross-referencing their overlapping threat analyses.
-
-## 7. Examples Directory — Telemetry Walkthroughs
-- Replace placeholders in `examples/example-transaction-pattern.md` and `examples/example-decoding-flow.md` with concrete scenarios that illustrate a telemetry heartbeat and a swarm negotiation cycle.
-- Add tables showing each transaction’s amount, fee, cardinality, block height delta, and interpreted symbol.
-- Ensure examples link back to the state vector formalism introduced in §3.
-
-## 8. New Supporting Files
-- **`specs/08-dialects.md`**: Define how dialect configs declare plane usage, reserved markers, and timing cadences.
-- **`examples/dialect-heartbeat.yaml`**: Machine-readable sample that the encoder/decoder skeletons can load when automation tooling is built.
-
----
-By applying these edits, the repository will reflect the telemetry-style, multi-variable communication model described in the recap, giving contributors clear targets for documentation and future implementation work.
+- **Spec completeness**: All TODO markers resolved in specs and whitepaper.
+- **CLI parity**: Every documented command (`plan-symbol`, `plan-chain`,
+  `plan-sequence`, `plan-pattern`, `send-symbol`, `send-message`, `watch`) has a
+  replayable example in `examples/` and regression coverage in `tests/`.
+- **Dialect lifecycle**: New dialects must ship with dry-run outputs, decoded
+  walkthroughs, and RPC setup notes to keep reproducibility intact.
