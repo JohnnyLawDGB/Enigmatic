@@ -15,7 +15,9 @@ authors = [
 dependencies = [
   "requests>=2.31",
   "PyYAML>=6.0",
-  "cryptography>=41.0"
+  "cryptography>=41.0",
+  "pandas>=2.0",
+  "numpy>=1.26"
 ]
 
 [project.optional-dependencies]
