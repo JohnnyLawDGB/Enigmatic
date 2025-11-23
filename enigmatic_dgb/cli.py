@@ -21,8 +21,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
+from .binary_packets import (
+    BinaryEncodingError,
+    decode_binary_packets_to_text,
+    encode_text_to_binary_packets,
+    format_packets_human_readable,
+)
 from .dialect import DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instructions
+from .dtsp import DTSPEncodingError, decode_dtsp_amounts, encode_dtsp_message, format_dtsp_table
 from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
@@ -51,6 +58,16 @@ MAX_OUTPUTS_PER_TX = 50
 
 class CLIError(RuntimeError):
     """Raised when CLI arguments are invalid."""
+
+
+def _parse_decimal_list(raw: str) -> list[Decimal]:
+    try:
+        decimals = [Decimal(piece.strip()) for piece in raw.split(",") if piece.strip()]
+    except InvalidOperation as exc:  # pragma: no cover - argument validation
+        raise CLIError(f"invalid decimal amount in: {raw}") from exc
+    if not decimals:
+        raise CLIError("no decimal amounts provided")
+    return decimals
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,6 +108,75 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="Polling cadence in seconds (default: 30)",
+    )
+
+    dtsp_encode_parser = subparsers.add_parser(
+        "dtsp-encode", help="encode a plaintext string using the DTSP mapping"
+    )
+    dtsp_encode_parser.add_argument("message", help="Text to encode")
+    dtsp_encode_parser.add_argument(
+        "--include-handshake",
+        action="store_true",
+        help="Prefix and suffix the sequence with start/end handshake codes",
+    )
+    dtsp_encode_parser.add_argument(
+        "--include-accept",
+        action="store_true",
+        help="Insert an accept code after the start code (implies handshake)",
+    )
+
+    dtsp_decode_parser = subparsers.add_parser(
+        "dtsp-decode", help="decode DTSP amounts back into plaintext"
+    )
+    dtsp_decode_parser.add_argument(
+        "amounts",
+        help="Comma-separated DTSP amounts (e.g. 0.00022666,0.00022663)",
+    )
+    dtsp_decode_parser.add_argument(
+        "--strip-handshake",
+        action="store_true",
+        help="Ignore start/accept/end codes when present",
+    )
+
+    subparsers.add_parser(
+        "dtsp-table", help="print the DTSP substitution and handshake table"
+    )
+
+    binary_encode_parser = subparsers.add_parser(
+        "binary-utxo-encode",
+        help="encode text into binary decimal UTXO packet amounts",
+    )
+    binary_encode_parser.add_argument("message", help="Text to encode")
+    binary_encode_parser.add_argument(
+        "--base-amount",
+        default="0.0001",
+        help="Decimal prefix added to every output amount (default: 0.0001)",
+    )
+    binary_encode_parser.add_argument(
+        "--bits-per-char",
+        type=int,
+        default=8,
+        help="Bit width used for each character (default: 8)",
+    )
+
+    binary_decode_parser = subparsers.add_parser(
+        "binary-utxo-decode",
+        help="decode binary decimal packet amounts back into text",
+    )
+    binary_decode_parser.add_argument(
+        "amounts",
+        help="Comma-separated amounts representing binary packets",
+    )
+    binary_decode_parser.add_argument(
+        "--base-amount",
+        default="0.0001",
+        help="Decimal prefix added during encoding (default: 0.0001)",
+    )
+    binary_decode_parser.add_argument(
+        "--bits-per-char",
+        type=int,
+        default=8,
+        help="Bit width used during encoding (default: 8)",
     )
 
     symbol_parser = subparsers.add_parser(
@@ -631,6 +717,49 @@ def _execute_sequence_plan(
     return txids
 
 
+def cmd_dtsp_encode(args: argparse.Namespace) -> None:
+    sequence = encode_dtsp_message(
+        args.message,
+        include_handshake=args.include_handshake or args.include_accept,
+        include_accept=args.include_accept,
+    )
+    print(",".join(str(value) for value in sequence))
+
+
+def cmd_dtsp_decode(args: argparse.Namespace) -> None:
+    amounts = _parse_decimal_list(args.amounts)
+    message = decode_dtsp_amounts(amounts, strip_handshake=args.strip_handshake)
+    print(message)
+
+
+def cmd_dtsp_table() -> None:
+    print(format_dtsp_table())
+
+
+def cmd_binary_encode(args: argparse.Namespace) -> None:
+    try:
+        base_amount = Decimal(args.base_amount)
+    except InvalidOperation as exc:  # pragma: no cover - argument validation
+        raise CLIError(f"invalid base amount: {args.base_amount}") from exc
+    packets = encode_text_to_binary_packets(
+        args.message, base_amount=base_amount, bits_per_char=args.bits_per_char
+    )
+    print(format_packets_human_readable(packets))
+    print("amounts:", ",".join(str(packet.amount) for packet in packets))
+
+
+def cmd_binary_decode(args: argparse.Namespace) -> None:
+    amounts = _parse_decimal_list(args.amounts)
+    try:
+        base_amount = Decimal(args.base_amount)
+    except InvalidOperation as exc:  # pragma: no cover - argument validation
+        raise CLIError(f"invalid base amount: {args.base_amount}") from exc
+    message = decode_binary_packets_to_text(
+        amounts, base_amount=base_amount, bits_per_char=args.bits_per_char
+    )
+    print(message)
+
+
 def cmd_send_message(args: argparse.Namespace) -> None:
     payload = _parse_payload_json(args.payload_json)
     message = EnigmaticMessage(
@@ -930,6 +1059,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_send_message(args)
         elif args.command == "watch":
             cmd_watch(args)
+        elif args.command == "dtsp-encode":
+            cmd_dtsp_encode(args)
+        elif args.command == "dtsp-decode":
+            cmd_dtsp_decode(args)
+        elif args.command == "dtsp-table":
+            cmd_dtsp_table()
+        elif args.command == "binary-utxo-encode":
+            cmd_binary_encode(args)
+        elif args.command == "binary-utxo-decode":
+            cmd_binary_decode(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
@@ -951,6 +1090,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         RuntimeError,
         DialectError,
         PlanningError,
+        BinaryEncodingError,
+        DTSPEncodingError,
     ) as exc:
         parser.exit(1, f"error: {exc}\n")
 
