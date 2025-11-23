@@ -1,39 +1,36 @@
-# Tooling Build & Usage Guide
+# Tooling & Usage Guide
 
-This guide collects the practical steps required to build the Enigmatic DigiByte
-toolchain from source and operate the included CLI utilities. It complements the
-architecture overview in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and the
-formal specs under `specs/`.
+This guide captures how to operate Enigmatic’s DigiByte reference stack. It
+aligns with `enigmatic_dgb/cli.py`, the specs in `../specs/`, and the examples in
+`../examples/` so contributors can move from a dry-run plan to an on-chain
+broadcast without guessing how components fit together.
 
 ## 1. Prerequisites
 
-- **Python:** 3.10 or newer.
-- **DigiByte node:** A DigiByte Core node with RPC enabled. Create a wallet that
-  will fund and observe Enigmatic patterns.
-- **System packages:** `git`, `python3-venv`, and `build-essential` (for
-  platforms that need C headers when installing dependencies).
+- **Python**: 3.10+.
+- **DigiByte node**: DigiByte Core with RPC enabled and a funded wallet.
+- **System packages**: `git`, `python3-venv`, `build-essential` (for dependency
+  builds).
 
-## 2. Build & install the CLI
+## 2. Install & verify the CLI
 
 ```bash
 git clone https://github.com/JohnnyLawDGB/Enigmatic.git
 cd Enigmatic
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
-```
 
-The editable install exposes the `enigmatic-dgb` executable and keeps it
-synchronized with your working tree. You can confirm the installation via:
-
-```bash
+# Confirm availability
 enigmatic-dgb --help
 ```
 
-## 3. Runtime configuration
+The editable install exposes the `enigmatic-dgb` CLI and keeps it synchronized
+with your working tree.
 
-Every tool that touches the blockchain shares the same RPC configuration. The
-CLI will automatically pick up these environment variables:
+## 3. RPC & wallet configuration
+
+All planner, sender, and watcher commands share a single configuration surface.
+Set environment variables to avoid repeating flags:
 
 ```bash
 export DGB_RPC_USER="rpcuser"
@@ -43,119 +40,142 @@ export DGB_RPC_PORT="14022"
 export DGB_RPC_WALLET="enigmatic"
 ```
 
-You can override any of them via CLI flags (see the planner commands below).
+Override any field per command with `--rpc-host`, `--rpc-port`, `--rpc-user`,
+`--rpc-password`, `--rpc-wallet`, or `--rpc-url`. Load and unlock the target
+wallet before broadcasting so the transaction builder can sign each frame.
 
-## 4. Tool suite overview
+## 4. Command surface
 
-| Component | Module / entry point | Primary purpose |
-| --------- | -------------------- | --------------- |
-| RPC client | `enigmatic_dgb.rpc_client.DigiByteRPC` | Typed JSON-RPC wrapper shared by all tools. |
-| Transaction builder | `enigmatic_dgb.tx_builder.TransactionBuilder` | Selects UTXOs, assembles, and signs spends. |
-| Encoder/decoder | `enigmatic_dgb.encoder`, `enigmatic_dgb.decoder` | Convert between high-level intents and spend instructions. |
-| Watcher | `enigmatic_dgb.watcher.Watcher` | Polls the node, groups packets, and emits decoded messages. |
-| CLI | `enigmatic_dgb.cli` / `enigmatic-dgb` | User-facing commands for sending, planning, and watching. |
-| Automation planner | `enigmatic_dgb.planner` | Loads dialects and produces reproducible symbol plans. |
+| Command | Purpose |
+| ------- | ------- |
+| `send-message` | Encode a free-form intent and payload without referencing a dialect. |
+| `send-symbol` | Encode and broadcast a symbol defined in a dialect YAML file. |
+| `plan-symbol` | Dry-run or broadcast a single symbol using automation metadata. |
+| `plan-chain` | Plan or broadcast multi-frame symbols defined in a dialect. |
+| `plan-pattern` | Plan/broadcast an explicit list of amounts (value-plane only). |
+| `send-sequence` / `plan-sequence` | Chained explicit sequences with optional OP_RETURN hints. |
+| `watch` | Observe an address and stream decoded packets. |
+| `dtsp-*`, `binary-utxo-*` | Encode/decode helpers for specific substitution mappings. |
 
-With the editable install in place you can import the modules directly from
-Python or rely on the CLI commands described below.
+Common planner flags:
 
-## 5. Sending a free-form message
+- `--min-confirmations` – funding UTXO filter (default 1; set to 0 for
+  unconfirmed starts).
+- `--min-confirmations-between-steps` – wait for confirmations between frames.
+- `--wait-between-txs` – poll cadence / pacing delay between frames.
+- `--max-wait-seconds` – abort threshold for confirmation waits.
+- `--fee` – override dialect fee punctuation (where supported).
 
-Use the `send-message` subcommand when you want to manually describe the intent
-and payload without referencing a higher-level dialect file:
+## 5. Typical workflow: dry-run → broadcast
+
+1. **Plan** a symbol or pattern without broadcasting.
+2. **Inspect** the emitted state vector: inputs, outputs (value plane), fee,
+   cardinality, block-placement expectations, and optional OP_RETURN hints.
+3. **Broadcast** the exact plan after review; the builder reuses the planned
+   change choreography so the broadcast matches the dry-run.
+
+### Example: dialect symbol
+
+```bash
+# Preview the HEARTBEAT symbol defined in examples/dialect-heartbeat.yaml
+enigmatic-dgb plan-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT --dry-run
+
+# Broadcast once reviewed
+enigmatic-dgb plan-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT --broadcast
+```
+
+### Example: chained frames from a dialect
+
+```bash
+enigmatic-dgb plan-chain \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT_CHAIN \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --min-confirmations 0 --max-frames 3 --dry-run
+
+# Add --broadcast to stream txids in order and reuse the planned change output between frames.
+```
+
+### Example: explicit sequences without a dialect
+
+```bash
+# Inspect a prime staircase
+enigmatic-dgb plan-sequence \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 73,61,47,37,23,13,5 \
+  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
+
+# Broadcast the same plan
+enigmatic-dgb send-sequence \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 73,61,47,37,23,13,5 \
+  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
+```
+
+### Example: free-form message
 
 ```bash
 enigmatic-dgb send-message \
   --to-address dgb1example... \
   --intent presence \
-  --channel ops-telemetry \
+  --channel ops \
   --payload-json '{"window": "mid"}'
 ```
 
-The CLI will:
-1. Build an `EnigmaticMessage` with the provided metadata.
-2. Run it through `EnigmaticEncoder` to derive the value/fee/cardinality pattern.
-3. Ask `TransactionBuilder` to select UTXOs and assemble a raw transaction.
-4. Broadcast the signed transaction via `DigiByteRPC`.
+## 6. Creating or extending dialects
 
-Add `--encrypt-with-passphrase <shared secret>` if you want the payload JSON to
-be encrypted before it is embedded into the pattern.
+1. Copy an existing dialect (e.g., `examples/dialect-heartbeat.yaml`).
+2. Define symbols and, if needed, multi-frame chains. Specify value anchors,
+   fee punctuation, cardinality, topology hints, block-placement cadence, and
+   optional OP_RETURN selectors.
+3. Use `enigmatic-dgb plan-symbol --dialect-path <file> --symbol <NAME> --dry-run`
+   to validate constraints and dust compliance.
+4. Iterate until the planned state vector matches the intended symbol, then
+   broadcast with `--broadcast` or incorporate into automation.
 
-## 6. Watching for patterns
+Keep dialect files close to their replay instructions inside `examples/README.md`
+so observers can reproduce them with the same CLI flags.
 
-To observe on-chain traffic destined for a receiver address, start the watcher:
+## 7. Decoding patterns and watching addresses
 
-```bash
-enigmatic-dgb watch --address dgb1observer... --poll-interval 15
-```
+- **Live observation**: `enigmatic-dgb watch --address <dgb1...> --poll-interval 15`
+  streams decoded packets (JSON per line). Pipe to `jq` or a log collector.
+- **DTSP helpers**: `dtsp-encode`, `dtsp-decode`, and `dtsp-table` convert
+  between plaintext and decimal-time-substitution patterns.
+- **Binary packet helpers**: `binary-utxo-encode` / `binary-utxo-decode` map text
+  to binary payloads expressed as decimal outputs.
 
-The watcher hits the DigiByte RPC interface every `poll-interval` seconds,
-wraps new transactions as `ObservedTx` objects, groups them into packets, and
-runs them through the decoder. Each decoded packet is printed as a JSON line so
-you can pipe it to `jq`, `grep`, or a log aggregator.
+Decoded walkthroughs in `examples/example-decoding-flow.md` mirror the watcher
+output and illustrate how block spacing and change-linking recover multi-frame
+symbols.
 
-## 7. Working with dialect symbols
+## 8. Integrating wallets & RPC setups
 
-Dialects bundle repeatable symbol definitions plus automation hints (wallets,
-fee targets, scheduling suggestions). Load the provided heartbeat example or
-your own dialect with the `send-symbol` command:
+- For **mainnet/testnet switching**, override `--rpc-port` and `--rpc-wallet`
+  per command while reusing the same dialect file.
+- For **air-gapped signing**, use `plan-*` commands to export the planned inputs
+  and outputs, sign offline via DigiByte Core, then broadcast with
+  `sendrawtransaction`.
+- For **automation**, wrap CLI invocations in scripts or import
+  `TransactionBuilder`, `SymbolPlanner`, and `DigiByteRPC` directly from the
+  package to reuse the same deterministic planning logic.
 
-```bash
-enigmatic-dgb send-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT \
-  --to-address dgb1example... \
-  --channel identity
-```
+## 9. Validation & troubleshooting
 
-`send-symbol` merges the dialect metadata with any overrides supplied on the
-command line, encodes the resulting symbol, and relays it just like
-`send-message`. Provide `--session-*` parameters when you are negotiating a
-session via `enigmatic_dgb.session.SessionContext`.
+- Run `pytest` to confirm encoder/decoder and planner invariants before rolling
+  out new dialects.
+- Use `--min-confirmations=0` with caution: chains will reference unconfirmed
+  change outputs in memory until the prior frame confirms.
+- If a broadcast fails, re-run the identical `plan-*` command to confirm no
+  wallet state drift occurred between planning and submission.
 
-## 8. Planning before broadcasting
+## 10. References
 
-When you want to inspect the exact transaction that would be produced before you
-sign or broadcast it, use the `plan-symbol` or `plan-pattern` helpers:
-
-```bash
-# Inspect a symbol defined in a dialect without broadcasting
-enigmatic-dgb plan-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT
-
-# Craft an explicit set of output amounts (value plane only)
-enigmatic-dgb plan-pattern \
-  --to-address dgb1example... \
-  --amounts 21.0,34.0,55.0,0.303 \
-  --fee 0.21
-```
-
-Both commands print the selected UTXOs, ordered outputs, change split, and fee.
-`plan-pattern` now produces a chained plan (one transaction per amount) so that
-duplicate outputs to the same address never trigger DigiByte Core's
-"duplicated address" RPC errors. The `--fee` argument applies per transaction,
-and the broadcast path returns every transaction ID in relay order. Planner-
-specific RPC flags (`--rpc-host`, `--rpc-port`, `--rpc-wallet`, etc.)
-temporarily override both environment defaults and dialect hints, which is
-useful when you stage a dialect on testnet or an air-gapped node.
-
-## 9. Running tests and linting
-
-Execute the unit tests to make sure the encoder/decoder stack still round-trips
-correctly after changes:
-
-```bash
-pytest
-```
-
-Add `pytest -k "roundtrip" -vv` when you want verbose output for the
-encoder/decoder coverage specifically. Formatting and import hygiene are handled
-by the default `ruff` profile defined in `pyproject.toml`:
-
-```bash
-ruff check .
-```
-
-Run both commands before opening a pull request so reviewers can focus on the
-protocol changes instead of style regressions.
+- Specs: `../specs/`
+- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- RPC experiments: [`rpc_test_plan.md`](rpc_test_plan.md)
+- Dialects and walkthroughs: `../examples/`

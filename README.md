@@ -1,70 +1,41 @@
-# Enigmatic — A Layer-0 Communication Protocol (DigiByte-Optimized)
+# Enigmatic — DigiByte Layer-0 Communication Stack
 
-**Enigmatic** is a Layer-0 communication protocol that uses DigiByte’s native
-UTXO, fee, and transaction topology space as a *steganographic message channel*.
+Enigmatic is a **Layer-0 communication protocol** that uses DigiByte’s native
+UTXO, fee, and transaction topology space as a multi-plane message channel.
+Each transaction expresses a **state vector** across value, fee, cardinality,
+topology, and block-placement planes so peers can interpret intent without
+adding new opcodes or consensus rules.
 
-> TL;DR for contributors: think **state planes**, not ciphertext blobs. Install
-> the package via `pip install -e .` to get the `enigmatic-dgb` CLI, or use
-> `scripts/enigmatic_rpc.py` when you want explicit control over UTXO plumbing.
+The repository ships four aligned pillars:
 
-Instead of adding new opcodes or data layers, Enigmatic treats:
+- **Specifications** (`specs/01-*.md`) – formalizes state planes, encoding and
+  decoding functions, and dialect composition.
+- **Whitepaper draft** (`docs/whitepaper.md`) – narrative that mirrors the spec
+  and current implementation.
+- **Python reference stack** (`enigmatic_dgb/`) – encoder, decoder, planner,
+  transaction builder, RPC client, and the `enigmatic-dgb` CLI.
+- **Examples & tests** (`examples/`, `tests/`) – reproducible dialects,
+  decoded walkthroughs, and pytest coverage.
 
-- Values (e.g. `21.21`, `7.00`, `0.978521`, `0.0100xxxx`)
-- Fees (e.g. `0.21`, `21.0`)
-- Input / output cardinalities (e.g. `21 in / 21 out`)
-- Transaction graph shapes
-- Optional `OP_RETURN` anchors
+Read this README for a high-level tour, then jump to
+[`docs/TOOLING.md`](docs/TOOLING.md) for CLI workflows or
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for module-level detail.
 
-as **programmable symbols** in a formally defined encoding scheme.
+## State Planes & Terminology
 
-### State Planes Quick Reference
+| Plane | Conveys | Example usage | Specification |
+| ----- | ------- | ------------- | ------------- |
+| **Value** | Amount anchors and repetition headers | `21.21` / `7.00` alternating beacons | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
+| **Fee** | Timing offsets and jitter bands | `0.21` cadence to punctuate frames | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
+| **Cardinality** | Input/output counts and symmetry | `21 in / 21 out` mirrored swarms | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
+| **Topology** | Output graph motifs and ordering windows | Fan-out trees, ring confirmations | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
+| **Block placement** | Height deltas and repetition | `Δheight = 3` heartbeat scheduling | [`specs/04-encoding-process.md`](specs/04-encoding-process.md), [`specs/05-decoding-process.md`](specs/05-decoding-process.md) |
+| **Auxiliary (OP_RETURN / metadata)** | Optional hints | Hash commitments, dialect selectors | [`specs/01-protocol-overview.md`](specs/01-protocol-overview.md) |
 
-| Plane             | Conveyed variables                              | Example usage                          | Specification links |
-| ----------------- | ------------------------------------------------ | -------------------------------------- | ------------------- |
-| **Value**         | Amount, repetition, fee invariance headers       | `21.21` / `7.00` alternating beacons   | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
-| **Fee**           | Timing offsets, jitter bands                     | `0.21` cadence to mark heartbeats      | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
-| **Cardinality**   | Input/output sizes, ordering, cluster symmetry   | `21 in / 21 out` mirrored swarms       | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
-| **Topology**      | Output structure, graph motifs, ordering windows | Fan-out trees, ring confirmations      | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
-| **Block placement** | Block interval alignment, timing, repetition   | `Δheight = 3` heartbeat scheduling     | [`specs/04-encoding-process.md`](specs/04-encoding-process.md), [`specs/05-decoding-process.md`](specs/05-decoding-process.md) |
-| **Auxiliary (OP_RETURN / metadata)** | Optional payload hints        | Hash commitments, dialect selectors    | [`specs/01-protocol-overview.md`](specs/01-protocol-overview.md) |
-
-Each plane evolves independently yet composes into a **state vector** (amount, fee, cardinality, topology, block placement) that conveys telemetry-style information rather than plaintext characters.
-
-### Telemetry vs. Cipher Framing
-
-- **Telemetry mindset:** Treat transactions as multi-dimensional heartbeats or consensus proofs. Variables such as timing, repetition, and cluster symmetry act like sensor channels that reveal system state to peers observing the ledger.
-- **Classical cipher mindset:** Focuses on transforming ASCII payloads via substitution or encryption before transport. Enigmatic intentionally avoids this framing; the message emerges from how state variables co-vary across planes.
-- **Implication for contributors:** When designing new dialects, think in terms of *state synchronization* and *multi-agent negotiation* (see `specs/04-encoding-process.md` and `specs/05-decoding-process.md`) rather than letter-level encoding tricks.
-
-This repository contains the **protocol specification**, **whitepaper**,
-**Python reference stack**, and **dial tone examples** for Enigmatic on DigiByte.
-
-## Non-Technical Primer
-
-If you are new to blockchains or protocol design, think of Enigmatic as a
-*coordination language* that uses ordinary DigiByte transactions as the words in
-a conversation:
-
-- **Wallet actions become signals.** Instead of embedding secret text inside a
-  transaction, Enigmatic changes how big the transaction is, what the fees look
-  like, and when it confirms. Observers who know the rules can read the pattern
-  the same way air-traffic controllers read blinking runway lights.
-- **Multiple "planes" act like knobs on a radio.** Value, fees, input counts,
-  graph shape, and block timing are tuned independently. Turning one knob may
-  indicate urgency while another might encode the intended recipient.
-- **No special software is required for the blockchain.** All transactions stay
-  valid, pay normal fees, and resemble day-to-day wallet traffic. The
-  intelligence is in how you choose and interpret the parameters.
-
-When designing or reviewing a dialect, ask two questions:
-
-1. *Is this transaction still boring to the rest of the network?* (It should be
-   indistinguishable from a routine payment.)
-2. *Can my counterpart extract the same meaning from the chosen pattern?*
-
-Keeping those questions in mind ensures Enigmatic remains practical for both
-operators and non-technical stakeholders who only need high-level assurance
-that the system behaves like regular DigiByte usage.
+**State vector**: a single transaction’s coordinates across the planes above.
+**Dialect**: a named ruleset mapping **symbols** (semantic intents) to state
+vectors. Multi-transaction symbols are expressed as **frames** in a chain. The
+specs keep these terms consistent for both implementers and analysts.
 
 ## Quickstart
 
@@ -74,358 +45,92 @@ cd Enigmatic
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 
-# Run unit tests
+# Verify the CLI is available
+enigmatic-dgb --help
+
+# Run unit tests (optional for docs-only edits)
 pytest
-
-# Send a message via the CLI (requires DGB RPC creds in env)
-enigmatic-dgb send-message --to-address dgb1example --intent identity
 ```
-
-Need more guidance? Peek at [`CONTRIBUTING.md`](CONTRIBUTING.md) for environment
-setup tips, repository conventions, and review expectations.
-
-For an end-to-end walkthrough of building the toolchain, wiring RPC
-configuration, and exercising each CLI subcommand, read
-[`docs/TOOLING.md`](docs/TOOLING.md).
-
----
-
-## Goals
-
-- Define a **chain-native, consensus-compatible signaling protocol**.
-- Leverage DigiByte as a **global, timestamped, censorship-resistant message bus**.
-- Preserve **plausible deniability** and normal wallet semantics.
-- Provide a **formal model** that cryptographers, protocol designers and
-  implementers can build upon.
-
----
-
-## Status
-
-- 📄 Whitepaper: **DigiByte-optimized, IEEE-style structure (in progress)**
-- ✅ Formal model: Section 3 drafted in `/specs/03-formal-model.md`
-- 🧪 Examples: UTXO patterns & decoding flows in `/examples`
-
----
 
 ## Repository Layout
 
-| Path | Contents |
-| ---- | -------- |
-| [`enigmatic_dgb/`](enigmatic_dgb) | Python package (encoder, decoder, watcher, CLI, RPC/transaction utilities). |
-| [`scripts/`](scripts) | Stand-alone helpers; currently the RPC heartbeat planner. |
-| [`examples/`](examples) | Dialects, walkthroughs, and diagrams ([index](examples/README.md)). |
-| [`docs/`](docs) | Whitepaper drafts, architecture notes, and doc guide ([index](docs/README.md)). |
-| [`specs/`](specs) | Canonical protocol chapters (overview → dialects). |
-| [`tests/`](tests) | Pytest coverage for encoder/decoder logic. |
-
-Rendered whitepaper PDFs live next to the Markdown originals inside `docs/`
-when reviewers need to diff layout.
-
-### Reference stack components
-
-The Python package exposed via `enigmatic_dgb/` keeps the protocol concepts,
-planner, and automation workflows synchronized. The most-referenced modules are:
-
-- [`cli.py`](enigmatic_dgb/cli.py) – Entry point for `enigmatic-dgb` commands
-  (`plan-symbol`, `send-sequence`, `plan-chain`, etc.). The CLI wires RPC
-  credentials, planner options, encryption/session settings, and TxBuilder
-  behavior through a single surface area.
-- [`planner.py`](enigmatic_dgb/planner.py) – Converts value/fee/cardinality
-  constraints from a dialect or ad-hoc request into spendable UTXO sets and
-  change choreography. Planner outputs are reused by dry runs and broadcasts so
-  auditors can diff expectations vs. relayed state vectors.
-- [`tx_builder.py`](enigmatic_dgb/tx_builder.py) – Crafts DigiByte transactions
-  that honor dust rules, optional OP_RETURN hints, and deterministic change
-  placement before relaying via RPC.
-- [`rpc_client.py`](enigmatic_dgb/rpc_client.py) – Thin wrapper over
-  `getrawtransaction`, `listunspent`, and broadcast primitives so tests and the
-  CLI share a common interface.
-- [`watcher.py`](enigmatic_dgb/watcher.py) – Ledger observer used in examples to
-  decode chains and prove that telemetry style encodings round-trip through the
-  decoder.
-
-`docs/ARCHITECTURE.md` and `examples/README.md` expand on how those modules work
-together for multi-frame automation, while `tests/` exercises the encoder,
-decoder, and planner invariants.
-
----
-
-## RPC Heartbeat Helper
-
-The automation workflow now lives inside the package CLI so that every
-tool depends on the same RPC client and validation stack. Use the
-`plan-symbol` command to inspect or broadcast a symbolic heartbeat defined
-in [`examples/dialect-heartbeat.yaml`](examples/dialect-heartbeat.yaml).
-
-```bash
-export DGB_RPC_USER="rpcuser"
-export DGB_RPC_PASSWORD="rpcpass"
-
-# Dry run: prints the proposed inputs/outputs without broadcasting.
-enigmatic-dgb plan-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT
-
-# Broadcast the transaction once the plan looks correct.
-enigmatic-dgb plan-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT \
-  --broadcast
-```
-
-Highlights:
-
-- Loads the automation metadata (endpoint, wallet name, scheduling hints)
-  from the dialect file but allows overrides via CLI flags or
-  environment variables.
-- Selects UTXOs that satisfy the cardinality and value constraints defined
-  for the symbol.
-- Splits change outputs to preserve the desired output cardinality while
-  respecting DigiByte's dust limits.
-- Supports dry-run planning so operators can audit the state vector
-  before a transaction is signed and relayed.
-
-Ensure your node has the target wallet loaded and unlocked before
-invocation. For end-to-end validation scenarios see
-[`docs/rpc_test_plan.md`](docs/rpc_test_plan.md).
-
-### Chained Messages
-
-Some symbols now describe a sequence of frames that must be sent as a chained
-set of transactions to the same destination address. The CLI exposes two ways
-to plan and audit those envelopes:
-
-```bash
-# Inspect the frames declared in the dialect but stop before broadcast.
-enigmatic-dgb plan-chain \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT_CHAIN \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --max-frames 3 --dry-run
-
-# Use the legacy helper but force it to emit a chained plan.
-enigmatic-dgb plan-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT_CHAIN \
-  --as-chain --max-frames 3
-```
-
-Both flows reuse the same planner abstraction so the change output from frame
-`n` becomes the sole input for frame `n+1`. The summary emitted by
-`plan-chain` now also lists the initial funding UTXOs so you can verify exactly
-which coins will be consumed. Supplying `--broadcast` signs and sends the
-chained transactions in order, returning the list of DigiByte TXIDs.
-
-New CLI flags make chained automation smoother:
-
-- `--min-confirmations` controls the initial UTXO filter. Set it to `0` when you
-  want to use unconfirmed wallet outputs as the starting fuel for the chain.
-- `--min-confirmations-between-steps` tells the CLI to pause between frames
-  until the previous transaction has the requested number of confirmations.
-- `--wait-between-txs` sets the polling interval for the confirmation loop and
-  doubles as a pacing delay when confirmations are not required.
-- `--max-wait-seconds` lets you cap how long the CLI will wait before aborting.
-
-For explicit payment patterns (`plan-pattern`, `send-sequence`) and
-dialect-driven chains (`plan-chain`) the same flags are available so that you
-can build a full chain in one pass without refreshing `listunspent` between
-steps. When `--min-confirmations` is set to `0` the planner tracks the synthetic
-change internally and immediately references the previous change output in the
-next transaction.
-
-## Unified CLI Workflows
-
-The modern CLI keeps the encoder, planner, and transaction builder aligned so
-that you can audit a pattern, attach optional OP_RETURN metadata, and broadcast
-through the same surface area.
-
-Example: build and broadcast a three-transaction sequence that pauses for one
-confirmation between each hop.
-
-```bash
-enigmatic-dgb plan-pattern \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --amounts 3.1,2.1,1.3 \
-  --fee 0.21 --broadcast \
-  --min-confirmations 0 \
-  --min-confirmations-between-steps 1 \
-  --wait-between-txs 10 --max-wait-seconds 600
-```
-
-The planner fetches the funding set once, prints the planned change flow, and
-then relays each transaction via the `TransactionBuilder`. If
-`--min-confirmations-between-steps` is greater than zero the CLI prints log
-lines such as `Tx1: waiting for 1 confirmations (current: 0)` until the RPC
-reports enough confirmations for the next frame.
-
-### Dialect-driven symbols (`send-symbol`)
-
-Use `enigmatic-dgb send-symbol` to encode any YAML dialect symbol and relay the
-result via the `TransactionBuilder`. The command accepts optional
-session/encryption parameters, `--fee` overrides, and a `--dry-run` flag that
-prints a compact summary of the aggregated outputs plus any OP_RETURN hints the
-encoder generated.
-
-```bash
-enigmatic-dgb send-symbol \
-  --dialect-path examples/dialect-heartbeat.yaml \
-  --symbol HEARTBEAT_CHAIN \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --channel ops --dry-run
-```
-
-The dry-run flow shows each value-plane spend, the total fee punctuation, and
-the OP_RETURN digest (if emitted) before signing anything. Drop `--dry-run`
-once the state vector looks correct to broadcast the symbol. Supplying `--fee`
-lets you override the dialect's punctuation when coordinating with wallets that
-prefer different absolute fees.
-
-### Pattern sequences (`send-sequence` / `plan-sequence`)
-
-When you want to experiment with ad-hoc numeric motifs (e.g., Fibonacci fan-outs
-or prime staircases) without maintaining a dialect file, use
-`enigmatic-dgb send-sequence`. The command takes a comma-separated list of
-amounts, a per-transaction fee, and optional OP_RETURN payloads for each hop.
-`plan-sequence` is a read-only alias that always stops after planning.
-
-```bash
-# Inspect the 7-part ISEEYOU PrimeSeries without broadcasting
-enigmatic-dgb send-sequence \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --amounts 73,61,47,37,23,13,5 \
-  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U --dry-run
-
-# Execute the same plan, emitting chained txids in order
-enigmatic-dgb send-sequence \
-  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
-  --amounts 73,61,47,37,23,13,5 \
-  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
-```
-
-Each dry run prints a per-transaction table that shows the funded inputs, the
-destination amount, change routing, and the decoded OP_RETURN hint. Broadcasting
-reuses the same plan and streams the txids in order, chaining the change output
-from transaction _n_ into transaction _n+1_.
-
-You can still fall back to `plan-pattern`/`plan-chain` for legacy automation
-scripts, but the new unified commands keep the dialect, encoder, planner, and
-TxBuilder in lockstep.
-
-## Documentation & Spec Map
-
-- [`docs/README.md`](docs/README.md) — Human-readable guide to the whitepaper,
-  architecture notes, and PDF snapshots.
-- [`specs/`](specs) — Eight focused chapters that define the protocol from
-  overview through dialects. Start at `01-protocol-overview.md` and work down.
-- [`examples/README.md`](examples/README.md) — Dialects plus decoded walkthroughs
-  you can replay with the RPC helper.
-
-Surface area intentionally stays small: the README or CONTRIBUTING should be the
-only entry points you need before diving into specs or code.
-
-## Contributing
-
-- Follow the [quickstart](#quickstart) to set up tooling, then read
-  [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow expectations.
-- Document any new dialects/examples inside [`examples/README.md`](examples/README.md)
-  so replay instructions stay close to the assets.
-- Run `pytest` before opening a PR and highlight spec edits in your summary so
-  reviewers can focus on semantics.
-
----
-
-## Live Experiments
-
-The repo intentionally ships with dial tones you can reproduce on mainnet
-or testnet. To replay the INTEL-style exchange seen on-chain:
-
-1. Configure a DigiByte node with a funded wallet and export credentials:
-
-   ```bash
-   export DGB_RPC_USER="rpcuser"
-   export DGB_RPC_PASSWORD="rpcpass"
-   ```
-
-2. Dry-run the INTEL HELLO symbol. This mirrors the 217 → 152 → 352 anchor
-   trio plus the `0.152` micro-breadcrumb and the invariant `0.21` fee:
-
-    ```bash
-    enigmatic-dgb plan-symbol \
-      --dialect-path examples/dialect-intel.yaml \
-      --symbol INTEL_HELLO
-    ```
-
-3. Review the proposed spend (inputs, anchors, change). Once it matches the
-   expected state vector, broadcast it:
-
-    ```bash
-    enigmatic-dgb plan-symbol \
-      --dialect-path examples/dialect-intel.yaml \
-      --symbol INTEL_HELLO \
-      --broadcast
-    ```
-
-4. Log the resulting `txid`, block height, and timestamps. Repeat for
-   `INTEL_PRESENCE` or `INTEL_HIGH_PRESENCE` to measure how peers respond.
-
-5. Watch for symmetric replies (same anchors, `0.21` fee, and matching micro
-   shards). The `examples/example-decoding-flow.md` file now contains a
-   walkthrough of the 06:24:14 chord decoded via the new dialect.
-
-This section is intentionally lightweight—treat it as a lab notebook for
-documenting reproducible transmissions and their decoded interpretations.
-
----
-
-## High-Level Idea
-
-Enigmatic defines:
-
-- A **message space** \\( \mathcal{M} \\): abstract protocol primitives (opcodes, bytes, tags)
-- An **encoding function** \\( \mathcal{E}(M) \rightarrow t \\): which maps message
-  primitives into concrete DigiByte transactions
-- A **decoding function** \\( \mathcal{D}(t) \rightarrow M' \\): which recovers the
-  intended symbols from the transaction graph
-
-All encodings are:
-
-- Valid DigiByte transactions
-- Economically plausible
-- Steganographic by default: transaction flows look like normal wallet behavior
-
-### Deterministic Expression Dictionary
-
-| Expression | Plain-language meaning | Where it shows up |
-| ---------- | ---------------------- | ----------------- |
-| \\( \mathcal{M} \\) | The abstract "message space" — every possible intent, tag, or symbol Enigmatic can describe before it touches the blockchain. | `specs/01-protocol-overview.md`, `specs/02-encoding-primitives.md` |
-| \\( \mathcal{E}(M) \rightarrow t \\) | The encoding function: take a message from \\( \mathcal{M} \\) and turn it into a concrete DigiByte transaction \\( t \\). Think "planner" that chooses values, fees, and graph layout. | README, `specs/02-encoding-primitives.md` |
-| \\( \mathcal{D}(t) \rightarrow M' \\) | The decoding function: observe a real transaction and reconstruct the intended message. Comparable to a telemetry parser that turns sensor readings back into structured data. | README, `specs/03-formal-model.md` |
-| **State plane** | One dimension of the transaction (value, fee, cardinality, topology, block placement) that can carry information. | README table above, `specs/03-formal-model.md` |
-| **State vector** | The combination of all state planes for a single transaction. Equivalent to a row in a spreadsheet describing one heartbeat. | `specs/03-formal-model.md`, `specs/04-encoding-process.md` |
-| **Dialect** | A named ruleset that maps symbols to state vectors, similar to how Morse code maps dots and dashes to letters. | `examples/`, `specs/06-dialects.md` |
-| **Deterministic** | Means that given the same inputs (dialect + intent) the encoder will always choose the same transaction pattern, eliminating guesswork for the decoder. | README, specs generally |
-
----
-
-## Scope and Non-Goals
-
-**In scope:**
-
-- Formal definitions and proofs-of-concept  
-- Encoding / decoding specifications  
-- Security and detection analysis  
-- Reference implementation notes  
-
-**Out of scope (for now):**
-
-- Production wallet integrations  
-- Miner policy changes  
-- Any DigiByte consensus modifications  
-
----
+| Path | Purpose |
+| ---- | ------- |
+| [`enigmatic_dgb/`](enigmatic_dgb) | Python package: encoder/decoder, planner, transaction builder, RPC client, CLI entry point. |
+| [`specs/`](specs) | Canonical protocol chapters: overview → encoding primitives → formal model → encoding/decoding processes → dialects and security. |
+| [`docs/`](docs) | Whitepaper draft, architecture notes, tooling guide, roadmap, and RPC test plan. |
+| [`examples/`](examples) | Dialects plus decoded walkthroughs you can replay (see `examples/README.md`). |
+| [`tests/`](tests) | Pytest suite covering encoder, planner, decoder, and CLI utilities. |
+
+## Tooling Snapshot
+
+All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
+[`docs/TOOLING.md`](docs/TOOLING.md). Highlights:
+
+- **Plan or send a symbol from a dialect**: `enigmatic-dgb plan-symbol` /
+  `enigmatic-dgb send-symbol`
+- **Plan chained frames from a dialect**: `enigmatic-dgb plan-chain`
+- **Plan or send explicit sequences**: `enigmatic-dgb plan-sequence` /
+  `enigmatic-dgb send-sequence` and `enigmatic-dgb plan-pattern`
+- **Free-form intents**: `enigmatic-dgb send-message`
+- **Observation and decoding**: `enigmatic-dgb watch`, `dtsp-*`,
+  `binary-utxo-*`
+
+Typical workflow: **dry-run → review state vector → broadcast**. Wallet and RPC
+credentials are shared across commands via environment variables or CLI
+overrides. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for reproducible
+on-chain experiments.
+
+## Architecture Snapshot
+
+The reference stack keeps the formal model executable:
+
+- `planner.py` selects UTXO sets and arranges change to satisfy dialect
+  constraints (cardinality, value headers, block spacing).
+- `tx_builder.py` assembles DigiByte transactions with deterministic ordering,
+  dust compliance, and optional OP_RETURN hints.
+- `encoder.py` / `decoder.py` translate intents to/from state vectors;
+  `watcher.py` observes chains of frames.
+- `rpc_client.py` wraps DigiByte JSON-RPC; tests and CLI share the same client.
+
+`docs/ARCHITECTURE.md` links these modules to the spec chapters so auditors can
+trace every state plane from definition to implementation.
+
+## Examples & Dialects
+
+Replayable assets live in `examples/`:
+
+- `dialect-heartbeat.yaml` and `dialect-intel.yaml` define symbols and frames.
+- `example-decoding-flow.md` shows how a multi-frame reply is parsed back into
+  symbols via `watcher.py`.
+- `examples/README.md` indexes additional motifs and decoded traces.
+
+Use `enigmatic-dgb plan-symbol --dialect-path examples/dialect-heartbeat.yaml --symbol HEARTBEAT --dry-run`
+to inspect a state vector before broadcasting it.
+
+## Security & Deniability
+
+Enigmatic keeps transactions economically plausible and policy-compliant while
+embedding meaning in the joint distribution of state planes. The security model
+in [`specs/06-security-model.md`](specs/06-security-model.md) details threat
+assumptions, detectability bounds, and deniability considerations.
+
+## Documentation Map
+
+- Protocol specs: [`specs/`](specs)
+- Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Tooling guide: [`docs/TOOLING.md`](docs/TOOLING.md)
+- Whitepaper draft: [`docs/whitepaper.md`](docs/whitepaper.md)
+- Roadmap: [`docs/expansion-roadmap.md`](docs/expansion-roadmap.md)
+
+## What’s Next
+
+Near- and mid-term priorities emphasize production-grade wallet integration,
+expanded dialect coverage, and richer observability. See
+[`docs/expansion-roadmap.md`](docs/expansion-roadmap.md) for the tracked items
+and adoption milestones.
 
 ## License
 
-This project is licensed under the **MIT License**.  
-See [`LICENSE`](./LICENSE) for details.
+This project is licensed under the **MIT License**.
+See [`LICENSE`](LICENSE) for details.
