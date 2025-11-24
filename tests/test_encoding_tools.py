@@ -7,26 +7,38 @@ from enigmatic_dgb.binary_packets import (
     decode_binary_packets_to_text,
     encode_text_to_binary_packets,
 )
-from enigmatic_dgb.dtsp import DTSPEncodingError, decode_dtsp_amounts, encode_dtsp_message
+from enigmatic_dgb.dtsp import (
+    DTSPEncodingError,
+    decode_dtsp_sequence_to_message,
+    encode_handshake_accept,
+    encode_handshake_end,
+    encode_handshake_start,
+    encode_message_to_dtsp_sequence,
+)
 
 
 def test_dtsp_roundtrip_with_handshake():
     message = "Hello World"
-    encoded = encode_dtsp_message(message, include_handshake=True)
-    assert decode_dtsp_amounts(encoded) == message.upper()
+    encoded = encode_message_to_dtsp_sequence(message)
+    assert decode_dtsp_sequence_to_message(encoded) == message.upper()
 
 
 def test_dtsp_accept_sequence_preserved_when_not_stripping_handshake():
     message = "HI"
-    encoded = encode_dtsp_message(message, include_handshake=True, include_accept=True)
-    decoded = decode_dtsp_amounts(encoded, strip_handshake=False)
+    encoded = [
+        encode_handshake_start(),
+        encode_handshake_accept(),
+        *encode_message_to_dtsp_sequence(message, include_start_end=False),
+        encode_handshake_end(),
+    ]
+    decoded = decode_dtsp_sequence_to_message(encoded, require_start_end=False)
     assert decoded.startswith("startaccept")
     assert decoded.endswith("end")
 
 
 def test_dtsp_rejects_unknown_characters():
     with pytest.raises(DTSPEncodingError):
-        encode_dtsp_message("€")
+        encode_message_to_dtsp_sequence("€")
 
 
 def test_binary_packet_roundtrip():

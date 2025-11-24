@@ -23,6 +23,7 @@ class ObservedTx:
     fee: float | None = None
     op_return_data: bytes | None = None
     script_plane: ScriptPlane | None = None
+    block_height: int | None = None
 
 
 def group_into_packets(txs: List[ObservedTx], config: EncodingConfig) -> List[List[ObservedTx]]:
