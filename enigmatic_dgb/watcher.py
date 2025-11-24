@@ -127,6 +127,7 @@ class Watcher:
                     op_return_data=op_return,
                     script_plane=script_plane,
                     block_height=block_height,
+                    address=address,
                 )
             )
         return observed

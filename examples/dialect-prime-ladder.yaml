@@ -1,0 +1,58 @@
+# Prime ladder dialect for encoding consecutive prime ratios on DigiByte.
+name: prime-ladder
+version: 0.1.0
+description: >-
+  Ladder-step dialect that captures the observed prime ratios (p_n / p_{n+1}) such
+  as 41/47, 47/53, 53/59, and extends them into programmable symbols. Each symbol
+  is designed to be usable by the existing planner to emit prime ladder steps,
+  balancing register outputs, and 0.21-style handshake fees.
+fee_punctuation: 0.21021
+symbols:
+  LADDER_STEP_41_47_53_59:
+    description: >-
+      Continues the ladder from 41/47 and 47/53 inputs to a 53/59 output while
+      emitting a balancing register. Use this to keep the ladder moving toward
+      the next prime ratio while maintaining the familiar 0.21021 fee punctuation.
+    intent: ladder_step
+    anchors: [0.89830508, 0.65082779]
+    micros: [0.21021]
+    metadata:
+      inputs: [0.87234043, 0.88679245]
+      outputs: [0.89830508, 0.65082779]
+      fee: 0.21021
+      note: "Consumes 41/47 and 47/53 style registers to emit 53/59 plus a balancing remainder."
+  LADDER_STEP_59_61:
+    description: >-
+      Emits the natural next ladder step 59/61 (≈0.96721311) to a continuation
+      address. Use with a balancing register output of your choice if you want to
+      preserve input = outputs + fee semantics.
+    intent: ladder_step
+    anchors: [0.96721311]
+    micros: [0.21021]
+    metadata:
+      primes: [59, 61]
+      ratio: 0.96721311
+      suggested_balancing_register: 0.03278689
+      note: "Single-output ladder fraction; pair with a register output if desired."
+  REGISTER_FOLD:
+    description: >-
+      Combines residual registers into a canonical 1.0 mailbox emission while
+      leaving a remainder (e.g., 32.31978647) and the standard 0.21 fee.
+    intent: register_fold
+    anchors: [1.0, 32.31978647]
+    micros: [0.21]
+    metadata:
+      outputs: [1.0, 32.31978647]
+      fee: 0.21
+      note: "Modeled after observed folds that flush 1.0 to the mailbox and retain a remainder."
+  HANDSHAKE_UNIT:
+    description: >-
+      Sends exactly 1.0 DGB with a 0.21/0.21021 fee to the shared mailbox to mark
+      acknowledgements or sequence boundaries.
+    intent: handshake
+    anchors: [1.0]
+    micros: [0.21021]
+    metadata:
+      handshake: true
+      fee_options: [0.21, 0.21021]
+      note: "Use to mirror observed 1.0 mailbox handshakes between prime ladder steps."

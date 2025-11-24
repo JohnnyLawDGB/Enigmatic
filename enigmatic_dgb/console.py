@@ -11,6 +11,8 @@ import traceback
 from typing import List, Sequence
 
 from . import cli
+from . import prime_ladder
+from .decoder import ObservedTx
 from .dtsp import (
     DTSP_CONTROL,
     DTSPEncodingError,
@@ -294,6 +296,109 @@ def handle_numeric_sequences() -> None:
         _pause()
 
 
+def _format_amount(amount: float) -> str:
+    return f"{amount:.8f}".rstrip("0").rstrip(".")
+
+
+def handle_prime_ladder() -> None:
+    """Plan or send a prime ladder step using p_n / p_{n+1} ratios."""
+
+    default_index = 3 if len(prime_ladder.PRIME_SEQUENCE) > 4 else 0
+    while True:
+        print(
+            textwrap.dedent(
+                """
+                Prime ladder mode
+                [1] Plan prime ladder step
+                [2] Send prime ladder step
+                [B] Back
+                """
+            )
+        )
+        choice = input("Select an option: ").strip().lower()
+        if choice in {"b", "0"}:
+            return
+        if choice not in {"1", "2"}:
+            print("Invalid selection, please try again.\n")
+            continue
+
+        to_address = prompt_str("Destination address")
+        use_custom = input("Override prime pair? [y/N]: ").strip().lower().startswith("y")
+        if use_custom:
+            numerator = prompt_int("Numerator prime (p)")
+            denominator = prompt_int("Denominator prime (q)")
+            if numerator is None or denominator is None:
+                print("Prime values are required when overriding the pair.\n")
+                continue
+            ratio = prime_ladder.prime_ratio(numerator, denominator)
+        else:
+            index = prompt_int(
+                "Prime ladder index (0 = first pair in sequence)", default=default_index
+            )
+            if index is None:
+                print("Prime ladder index is required.\n")
+                continue
+            try:
+                ratio = prime_ladder.ladder_step_ratio(index)
+                numerator = prime_ladder.PRIME_SEQUENCE[index]
+                denominator = prime_ladder.PRIME_SEQUENCE[index + 1]
+            except (IndexError, ValueError) as exc:
+                print(f"Unable to compute ratio: {exc}\n")
+                continue
+
+        include_register = (
+            input("Include balancing register output? [Y/n]: ").strip().lower()
+            not in {"n", "no"}
+        )
+        balancing_amount = None
+        if include_register:
+            balancing_amount = prompt_float(
+                "Balancing register amount (optional)", default=0.65082779
+            )
+        fee = prompt_float("Fee per transaction", default=0.21021)
+        dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
+
+        amounts = [ratio]
+        if balancing_amount is not None:
+            amounts.append(balancing_amount)
+        amounts_csv = ",".join(_format_amount(value) for value in amounts)
+        mode = "DRY RUN" if dry_run else "BROADCAST"
+        plan_or_send = "plan-sequence" if choice == "1" else "send-sequence"
+
+        print(
+            textwrap.dedent(
+                f"""
+                Prime ladder step summary
+                p/q: {numerator}/{denominator}
+                ladder amount: {ratio:.8f}
+                outputs: {amounts_csv}
+                fee: {fee}
+                mode: {mode}
+                """
+            )
+        )
+        if not _confirm():
+            print("Cancelled.\n")
+            continue
+
+        args = [
+            plan_or_send,
+            "--to-address",
+            to_address,
+            "--amounts",
+            amounts_csv,
+            "--fee",
+            str(fee if fee is not None else DEFAULT_FEE),
+        ]
+        if dry_run:
+            args.append("--dry-run")
+
+        print(f"Running command: enigmatic-dgb {' '.join(args)}")
+        code = run_enigmatic_cli(args)
+        print(f"Command finished with exit code {code}\n")
+        _pause()
+
+
 def handle_dtsp_messaging() -> None:
     """Encode DTSP text into a fee- or amount-plane sequence."""
 
@@ -461,6 +566,93 @@ def handle_decode_watch() -> None:
     _pause()
 
 
+def _group_transactions_by_txid(observed: Sequence[ObservedTx]) -> dict[str, list[ObservedTx]]:
+    grouped: dict[str, list[ObservedTx]] = {}
+    for tx in observed:
+        grouped.setdefault(tx.txid, []).append(tx)
+    return grouped
+
+
+def _dedupe_addresses(entries: Sequence[ObservedTx]) -> list[str]:
+    return sorted({entry.address for entry in entries if entry.address})
+
+
+def _is_close(value: float, target: float, tolerance: float = 1e-8) -> bool:
+    return abs(value - target) <= tolerance
+
+
+def _detect_prime_ladder_activity(
+    observed: Sequence[ObservedTx], tolerance: float = 1e-8
+) -> dict[str, list[dict]]:
+    grouped = _group_transactions_by_txid(observed)
+    ladder_steps: list[dict] = []
+    register_folds: list[dict] = []
+    handshakes: list[dict] = []
+    fee_targets = (0.21, 0.21021)
+
+    for txid, entries in grouped.items():
+        fees = [entry.fee for entry in entries if entry.fee is not None]
+        fee = fees[0] if fees else None
+        addresses = _dedupe_addresses(entries)
+        seen_pairs: set[tuple[int, int]] = set()
+
+        for entry in entries:
+            match = prime_ladder.match_prime_ratio(entry.amount, tolerance=tolerance)
+            if match is None:
+                continue
+            _, numerator, denominator, ratio = match
+            pair_key = (numerator, denominator)
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            ladder_steps.append(
+                {
+                    "txid": txid,
+                    "p": numerator,
+                    "q": denominator,
+                    "ratio": ratio,
+                    "amount": entry.amount,
+                    "timestamp": entry.timestamp,
+                    "block_height": entry.block_height,
+                    "addresses": addresses,
+                    "fee": fee,
+                }
+            )
+
+        unit_outputs = [entry for entry in entries if _is_close(entry.amount, 1.0, tolerance)]
+        remainders = [entry.amount for entry in entries if not _is_close(entry.amount, 1.0, tolerance)]
+        if unit_outputs and remainders:
+            register_folds.append(
+                {
+                    "txid": txid,
+                    "remainder": max(remainders),
+                    "timestamp": entries[0].timestamp,
+                    "block_height": entries[0].block_height,
+                    "addresses": addresses,
+                    "fee": fee,
+                }
+            )
+
+        fee_matches = fee is not None and any(_is_close(fee, target, tolerance) for target in fee_targets)
+        if unit_outputs and fee_matches:
+            handshakes.append(
+                {
+                    "txid": txid,
+                    "amount": unit_outputs[0].amount,
+                    "timestamp": unit_outputs[0].timestamp,
+                    "block_height": unit_outputs[0].block_height,
+                    "addresses": addresses,
+                    "fee": fee,
+                }
+            )
+
+    return {
+        "ladder_steps": ladder_steps,
+        "register_folds": register_folds,
+        "handshake_units": handshakes,
+    }
+
+
 def analyze_address_activity(
     addresses: Sequence[str],
     start_height: int | None,
@@ -547,6 +739,11 @@ def analyze_address_activity(
         )
 
     dtsp_decoding = _decode_dtsp_candidates(dtsp_candidates)
+    prime_ladder_activity = (
+        _detect_prime_ladder_activity(observed)
+        if mode != "binary-only"
+        else {"ladder_steps": [], "register_folds": [], "handshake_units": []}
+    )
 
     return {
         "address_count": len(addresses),
@@ -557,6 +754,7 @@ def analyze_address_activity(
         "dtsp_candidates": dtsp_candidates,
         "dtsp_decoding": dtsp_decoding,
         "binary_candidates": binary_candidates,
+        "prime_ladder": prime_ladder_activity,
         "start_height": start_height,
         "end_height": end_height,
         "start_time": start_time,
@@ -734,6 +932,53 @@ def handle_address_analysis() -> None:
             )
         )
 
+    prime_ladder_results = result.get("prime_ladder", {})
+    ladder_steps = prime_ladder_results.get("ladder_steps", [])
+    register_folds = prime_ladder_results.get("register_folds", [])
+    handshake_units = prime_ladder_results.get("handshake_units", [])
+
+    print("\nPrime ladder detections:")
+    if ladder_steps:
+        print("  Ladder steps:")
+        for step in ladder_steps:
+            destinations = ",".join(step.get("addresses") or []) or "(address unknown)"
+            print(
+                "    {p}/{q} -> {ratio:.8f} at h={height} to {dest} fee={fee}".format(
+                    p=step.get("p"),
+                    q=step.get("q"),
+                    ratio=step.get("ratio", 0.0),
+                    height=step.get("block_height") or "?",
+                    dest=destinations,
+                    fee=step.get("fee"),
+                )
+            )
+    else:
+        print("  (no prime ladder steps detected)")
+
+    if register_folds:
+        print("  Register folds:")
+        for fold in register_folds:
+            destinations = ",".join(fold.get("addresses") or []) or "(address unknown)"
+            print(
+                "    1.0 -> remainder {remainder:.8f} at h={height} to {dest} fee={fee}".format(
+                    remainder=fold.get("remainder", 0.0),
+                    height=fold.get("block_height") or "?",
+                    dest=destinations,
+                    fee=fold.get("fee"),
+                )
+            )
+    if handshake_units:
+        print("  Handshake units:")
+        for hs in handshake_units:
+            destinations = ",".join(hs.get("addresses") or []) or "(address unknown)"
+            print(
+                "    1.0 at h={height} to {dest} fee={fee}".format(
+                    height=hs.get("block_height") or "?",
+                    dest=destinations,
+                    fee=hs.get("fee"),
+                )
+            )
+
     print("\nBinary decoding candidates:")
     for candidate in result.get("binary_candidates", []):
         print(
@@ -816,6 +1061,7 @@ def _render_menu() -> None:
             [5] Chained patterns (plan-chain)
             [6] Decode / watch ledger activity
             [7] Address analysis (DTSP + binary)
+            [8] Prime ladder (ladder steps)
             [H] Help / Docs pointers
             [Q] Quit
             --------
@@ -847,6 +1093,8 @@ def console_main() -> None:
             handle_decode_watch()
         elif selection == "7":
             handle_address_analysis()
+        elif selection == "8":
+            handle_prime_ladder()
         elif selection in {"h", "?"}:
             handle_help()
         else:
