@@ -45,6 +45,10 @@ cd Enigmatic
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 
+# Export DigiByte RPC credentials used by the CLI
+export DGB_RPC_USER="rpcuser"
+export DGB_RPC_PASSWORD="rpcpass"
+
 # Start with the ASCII console to explore tools and menus
 enigmatic-dgb console
 
