@@ -24,6 +24,7 @@ class ObservedTx:
     op_return_data: bytes | None = None
     script_plane: ScriptPlane | None = None
     block_height: int | None = None
+    address: str | None = None
 
 
 def group_into_packets(txs: List[ObservedTx], config: EncodingConfig) -> List[List[ObservedTx]]:
