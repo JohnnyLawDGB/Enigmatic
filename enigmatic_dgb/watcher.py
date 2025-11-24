@@ -35,6 +35,7 @@ class Watcher:
         self.poll_interval_seconds = poll_interval_seconds
         self.decoder = EnigmaticDecoder(config)
         self._seen_txids: Dict[str, Set[str]] = {addr: set() for addr in self.addresses}
+        self._block_cache: Dict[str, int] = {}
 
     def poll_once(self) -> List[EnigmaticMessage]:
         """Poll the node for transactions touching the watched addresses."""
@@ -110,6 +111,7 @@ class Watcher:
                 # TODO: use block timestamp from gettransaction if available.
                 timestamp = int(time.time())
             decoded_tx = self._get_decoded_transaction(str(txid))
+            block_height = self._resolve_block_height(decoded_tx)
             op_return = self._extract_op_return_from_decoded(decoded_tx)
             script_plane = self._extract_script_plane(decoded_tx)
             observed.append(
@@ -124,9 +126,30 @@ class Watcher:
                     ),
                     op_return_data=op_return,
                     script_plane=script_plane,
+                    block_height=block_height,
                 )
             )
         return observed
+
+    def _resolve_block_height(self, decoded_tx: dict | None) -> int | None:
+        block_hash = None
+        if isinstance(decoded_tx, dict):
+            block_hash = decoded_tx.get("blockhash")
+            if decoded_tx.get("height") is not None:
+                return int(decoded_tx.get("height"))
+        if not block_hash:
+            return None
+        if block_hash in self._block_cache:
+            return self._block_cache[block_hash]
+        try:
+            block = self.rpc.getblock(block_hash)
+        except Exception:  # pragma: no cover - RPC plumbing
+            return None
+        if isinstance(block, dict) and block.get("height") is not None:
+            height = int(block["height"])
+            self._block_cache[block_hash] = height
+            return height
+        return None
 
     def _get_decoded_transaction(self, txid: str) -> dict | None:
         try:

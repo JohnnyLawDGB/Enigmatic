@@ -29,7 +29,15 @@ from .binary_packets import (
 )
 from .dialect import DialectError, load_dialect
 from .encoder import EnigmaticEncoder, SpendInstruction, aggregate_spend_instructions
-from .dtsp import DTSPEncodingError, decode_dtsp_amounts, encode_dtsp_message, format_dtsp_table
+from .dtsp import (
+    DTSPEncodingError,
+    DTSP_CONTROL,
+    DTSP_TOLERANCE,
+    closest_dtsp_symbol,
+    decode_dtsp_sequence_to_message,
+    encode_message_to_dtsp_sequence,
+    format_dtsp_table,
+)
 from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
@@ -140,6 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--strip-handshake",
         action="store_true",
         help="Ignore start/accept/end codes when present",
+    )
+    dtsp_decode_parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=DTSP_TOLERANCE,
+        help="Absolute tolerance when matching DTSP values (default: %(default)s)",
+    )
+    dtsp_decode_parser.add_argument(
+        "--show-matches",
+        action="store_true",
+        help="Print per-value symbol matches and errors",
     )
 
     subparsers.add_parser(
@@ -732,18 +751,41 @@ def _execute_sequence_plan(
 
 
 def cmd_dtsp_encode(args: argparse.Namespace) -> None:
-    sequence = encode_dtsp_message(
-        args.message,
-        include_handshake=args.include_handshake or args.include_accept,
-        include_accept=args.include_accept,
+    include_handshake = args.include_handshake or args.include_accept
+    sequence = encode_message_to_dtsp_sequence(
+        args.message, include_start_end=include_handshake
     )
-    print(",".join(str(value) for value in sequence))
+    if args.include_accept and sequence:
+        sequence.insert(1, DTSP_CONTROL["ACCEPT"])
+    print(",".join(f"{value:.8f}" for value in sequence))
 
 
 def cmd_dtsp_decode(args: argparse.Namespace) -> None:
-    amounts = _parse_decimal_list(args.amounts)
-    message = decode_dtsp_amounts(amounts, strip_handshake=args.strip_handshake)
+    parts = _split_csv(args.amounts)
+    if not parts:
+        raise CLIError("At least one DTSP amount is required")
+    try:
+        amounts = [float(part) for part in parts]
+    except ValueError as exc:  # pragma: no cover - input validation
+        raise CLIError(f"Invalid DTSP value: {exc}") from exc
+
+    message = decode_dtsp_sequence_to_message(
+        amounts,
+        require_start_end=not args.strip_handshake,
+        tolerance=args.tolerance,
+    )
+    if args.strip_handshake:
+        for token in ("start", "accept", "end"):
+            message = message.replace(token, "")
     print(message)
+
+    if args.show_matches:
+        for value in amounts:
+            symbol, error = closest_dtsp_symbol(value, args.tolerance)
+            if symbol:
+                print(f"{value:.8f} → {symbol} (error {error:.2e})")
+            else:
+                print(f"{value:.8f} → unknown (closest error {error:.2e})")
 
 
 def cmd_dtsp_table() -> None:

@@ -11,6 +11,14 @@ import traceback
 from typing import List, Sequence
 
 from . import cli
+from .dtsp import (
+    DTSP_CONTROL,
+    DTSPEncodingError,
+    DTSP_TOLERANCE,
+    closest_dtsp_symbol,
+    decode_dtsp_sequence_to_message,
+    encode_message_to_dtsp_sequence,
+)
 from .dialect import DialectError, load_dialect
 from .model import EncodingConfig
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
@@ -18,6 +26,7 @@ from .watcher import Watcher
 
 DEFAULT_FEE = 0.21
 DEFAULT_DIALECT = "examples/dialect-showcase.yaml"
+DTSP_GAP_SECONDS = 600.0
 
 
 def prompt_str(prompt: str, default: str | None = None) -> str:
@@ -285,6 +294,77 @@ def handle_numeric_sequences() -> None:
         _pause()
 
 
+def handle_dtsp_messaging() -> None:
+    """Encode DTSP text into a fee- or amount-plane sequence."""
+
+    print(
+        textwrap.dedent(
+            """
+            DTSP messaging helper
+            This will encode plaintext into the DTSP alphabet and prepare a send plan.
+            """
+        )
+    )
+
+    to_address = prompt_str("Destination address")
+    message = prompt_str("Plaintext message")
+    include_handshake = input("Include START/END handshake? [Y/n]: ").strip().lower() not in {
+        "n",
+        "no",
+    }
+    encode_via_fee = input("Encode on fee plane? [Y/n]: ").strip().lower() not in {"n", "no"}
+    base_amount = prompt_float(
+        "Base amount per transaction (for fee-plane carrier or amount-plane)",
+        default=0.0001,
+    )
+    carrier_fee = prompt_float("Fee per tx when using amount-plane", default=DEFAULT_FEE)
+    dry_run = input("Dry run (no broadcast)? [Y/n]: ").strip().lower() not in {"n", "no"}
+
+    sequence = encode_message_to_dtsp_sequence(message, include_start_end=include_handshake)
+    preview = decode_dtsp_sequence_to_message(
+        sequence, require_start_end=include_handshake if sequence else False
+    )
+    print("\nDTSP sequence prepared:")
+    print("  values:", ",".join(f"{value:.8f}" for value in sequence))
+    print(f"  decoded preview: {preview}")
+    print(f"  frames: {len(sequence)}")
+    mode_label = "plan" if dry_run else "broadcast"
+    print(f"Mode: {mode_label} using {'fee' if encode_via_fee else 'amount'} plane")
+
+    if not _confirm():
+        print("Cancelled.")
+        return
+
+    if encode_via_fee:
+        for index, value in enumerate(sequence, start=1):
+            args = [
+                "plan-sequence" if dry_run else "send-sequence",
+                "--to-address",
+                to_address,
+                "--amounts",
+                str(base_amount),
+                "--fee",
+                f"{value:.8f}",
+            ]
+            print(f"Running command for symbol #{index}: enigmatic-dgb {' '.join(args)}")
+            run_enigmatic_cli(args)
+    else:
+        amounts_csv = ",".join(f"{value:.8f}" for value in sequence)
+        args = [
+            "plan-sequence" if dry_run else "send-sequence",
+            "--to-address",
+            to_address,
+            "--amounts",
+            amounts_csv,
+            "--fee",
+            str(carrier_fee if carrier_fee is not None else DEFAULT_FEE),
+        ]
+        print(f"Running command: enigmatic-dgb {' '.join(args)}")
+        run_enigmatic_cli(args)
+
+    _pause()
+
+
 def handle_chains() -> None:
     """Plan or send chained patterns from dialect frames."""
 
@@ -401,6 +481,18 @@ def analyze_address_activity(
         observed = [tx for tx in observed if tx.timestamp.timestamp() >= start_time]
     if end_time is not None:
         observed = [tx for tx in observed if tx.timestamp.timestamp() <= end_time]
+    if start_height is not None:
+        observed = [
+            tx
+            for tx in observed
+            if tx.block_height is None or tx.block_height >= start_height
+        ]
+    if end_height is not None:
+        observed = [
+            tx
+            for tx in observed
+            if tx.block_height is None or tx.block_height <= end_height
+        ]
 
     observed.sort(key=lambda tx: tx.timestamp)
     binary_candidates: List[dict] = []
@@ -436,18 +528,99 @@ def analyze_address_activity(
     if observed:
         span_seconds = (observed[-1].timestamp - observed[0].timestamp).total_seconds()
 
+    dtsp_candidates = []
+    for tx in observed:
+        if tx.fee is None:
+            continue
+        symbol, error = closest_dtsp_symbol(tx.fee, DTSP_TOLERANCE)
+        if symbol is None:
+            continue
+        dtsp_candidates.append(
+            {
+                "txid": tx.txid,
+                "value": tx.fee,
+                "symbol": symbol,
+                "error": error,
+                "timestamp": tx.timestamp,
+                "block_height": tx.block_height,
+            }
+        )
+
+    dtsp_decoding = _decode_dtsp_candidates(dtsp_candidates)
+
     return {
         "address_count": len(addresses),
         "tx_count": len(observed),
         "time_span_seconds": span_seconds,
         "mode": mode,
         "dtsp_metrics": dtsp_metrics,
+        "dtsp_candidates": dtsp_candidates,
+        "dtsp_decoding": dtsp_decoding,
         "binary_candidates": binary_candidates,
         "start_height": start_height,
         "end_height": end_height,
         "start_time": start_time,
         "end_time": end_time,
     }
+
+
+def _decode_dtsp_candidates(candidates: List[dict]) -> dict:
+    """Attempt to group and decode DTSP candidates into messages."""
+
+    if not candidates:
+        return {"raw_values": [], "decoded_messages": []}
+
+    ordered = sorted(candidates, key=lambda entry: entry["timestamp"])
+    segments: List[List[dict]] = [[ordered[0]]]
+    for current in ordered[1:]:
+        previous = segments[-1][-1]
+        gap = (current["timestamp"] - previous["timestamp"]).total_seconds()
+        if gap > DTSP_GAP_SECONDS or previous["symbol"] == "END" or current["symbol"] == "START":
+            segments.append([current])
+            continue
+        segments[-1].append(current)
+
+    decoded_messages: List[dict] = []
+    for segment in segments:
+        values = [entry["value"] for entry in segment]
+        start_height = segment[0].get("block_height")
+        end_height = segment[-1].get("block_height")
+        start_time = segment[0]["timestamp"].isoformat()
+        end_time = segment[-1]["timestamp"].isoformat()
+        handshake_present = {entry["symbol"] for entry in segment} & set(DTSP_CONTROL)
+        notes: str
+        valid = False
+        text = ""
+        try:
+            text = decode_dtsp_sequence_to_message(
+                values, require_start_end=True, tolerance=DTSP_TOLERANCE
+            )
+            valid = True
+            notes = "Decoded with handshake"
+        except DTSPEncodingError as exc:
+            try:
+                text = decode_dtsp_sequence_to_message(
+                    values, require_start_end=False, tolerance=DTSP_TOLERANCE
+                )
+                notes = f"Decoded without handshake: {exc}"
+            except DTSPEncodingError as inner:
+                notes = f"Failed to decode: {inner}"
+        if handshake_present and "start" not in text.lower():
+            notes += "; handshake markers observed"
+        decoded_messages.append(
+            {
+                "start_height": start_height,
+                "end_height": end_height,
+                "start_time": start_time,
+                "end_time": end_time,
+                "values": values,
+                "text": text,
+                "valid": valid,
+                "notes": notes,
+            }
+        )
+
+    return {"raw_values": [entry["value"] for entry in ordered], "decoded_messages": decoded_messages}
 
 
 def handle_address_analysis() -> None:
@@ -482,7 +655,9 @@ def handle_address_analysis() -> None:
         print("No addresses provided.")
         return
 
-    print("Running analysis... (defaults to most recent 1000 transactions per address)")
+    print(
+        "Running analysis... (height/time filters will be applied when block data is available)"
+    )
     try:
         result = analyze_address_activity(
             addresses,
@@ -504,11 +679,60 @@ def handle_address_analysis() -> None:
     print(f"Transactions inspected: {result.get('tx_count')}")
     print(f"Time span (seconds): {result.get('time_span_seconds')}")
     print(f"Mode: {result.get('mode')}")
-    print("\nDTSP deltas (time/fee/amount):")
-    for entry in result.get("dtsp_metrics", []):
-        print(f"  Δt={entry['delta_time']}s fee={entry['fee']} amount={entry['amount']}")
-    if not result.get("dtsp_metrics"):
-        print("  (no DTSP metrics available)")
+    print("\nDTSP candidates:")
+    candidates = result.get("dtsp_candidates", [])
+    for cand in candidates:
+        height = cand.get("block_height")
+        height_desc = height if height is not None else "?"
+        print(
+            "  h={height} t={time} fee={fee:.8f} -> {symbol} (error {error:.2e})".format(
+                height=height_desc,
+                time=cand.get("timestamp"),
+                fee=cand.get("value"),
+                symbol=cand.get("symbol"),
+                error=cand.get("error", 0.0),
+            )
+        )
+    if not candidates:
+        print("  (no DTSP-like fee values detected)")
+
+    handshakes = [c for c in candidates if c.get("symbol") in DTSP_CONTROL]
+    if handshakes:
+        print("  Handshake markers detected:")
+        for marker in handshakes:
+            print(
+                "    {symbol} at height {height} time {time}".format(
+                    symbol=marker.get("symbol"),
+                    height=marker.get("block_height"),
+                    time=marker.get("timestamp"),
+                )
+            )
+
+    print("\nDTSP decoded messages:")
+    decoded_messages = result.get("dtsp_decoding", {}).get("decoded_messages", [])
+    if not decoded_messages:
+        print("  (no decodable DTSP messages)")
+    for message in decoded_messages:
+        print(
+            "  text='{text}' valid={valid} notes={notes}".format(
+                text=message.get("text"),
+                valid=message.get("valid"),
+                notes=message.get("notes"),
+            )
+        )
+        print(
+            "    values={values}".format(
+                values=[f"{value:.8f}" for value in message.get("values", [])]
+            )
+        )
+        print(
+            "    blocks={start}->{end} time={start_time}->{end_time}".format(
+                start=message.get("start_height"),
+                end=message.get("end_height"),
+                start_time=message.get("start_time"),
+                end_time=message.get("end_time"),
+            )
+        )
 
     print("\nBinary decoding candidates:")
     for candidate in result.get("binary_candidates", []):
@@ -542,6 +766,8 @@ def handle_help() -> None:
               * docs/TOOLING.md (if present)
               * specs/ (protocol specs)
               * examples/ (dialects and sample configs)
+              * DigiByte Transaction Signaling Protocol (DTSP) helpers for fee-plane
+                messaging with START/ACCEPT/END handshakes
 
             RPC environment variables typically required:
               * DGB_RPC_USER
@@ -586,9 +812,10 @@ def _render_menu() -> None:
             [1] Quickstart: send a simple pattern
             [2] Dialect-driven symbols (plan/send)
             [3] Numeric sequences (plan/send)
-            [4] Chained patterns (plan-chain)
-            [5] Decode / watch ledger activity
-            [6] Address analysis (DTSP + binary)
+            [4] DTSP messaging (encode/send)
+            [5] Chained patterns (plan-chain)
+            [6] Decode / watch ledger activity
+            [7] Address analysis (DTSP + binary)
             [H] Help / Docs pointers
             [Q] Quit
             --------
@@ -613,10 +840,12 @@ def console_main() -> None:
         elif selection == "3":
             handle_numeric_sequences()
         elif selection == "4":
-            handle_chains()
+            handle_dtsp_messaging()
         elif selection == "5":
-            handle_decode_watch()
+            handle_chains()
         elif selection == "6":
+            handle_decode_watch()
+        elif selection == "7":
             handle_address_analysis()
         elif selection in {"h", "?"}:
             handle_help()
