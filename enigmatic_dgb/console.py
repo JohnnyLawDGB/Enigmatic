@@ -72,6 +72,21 @@ def prompt_int(prompt: str, default: int | None = None) -> int | None:
             print("Invalid integer, please try again.")
 
 
+def _prompt_send_mode() -> tuple[bool, str]:
+    """Ask the user whether to send as chained frames or a single fan-out tx."""
+
+    choice = (
+        input(
+            "Send as: [1] multiple transactions (frames) [2] single transaction (fan-out) [1]: "
+        )
+        .strip()
+        .lower()
+    )
+    single_tx = choice == "2"
+    mode_label = "SINGLE-TX (fan-out)" if single_tx else "MULTI-TX (frames)"
+    return single_tx, mode_label
+
+
 def _should_debug() -> bool:
     return bool(int(os.environ.get("ENIGMATIC_DEBUG", "0")))
 
@@ -275,6 +290,10 @@ def handle_numeric_sequences() -> None:
         fee = prompt_float("Fee per transaction", default=DEFAULT_FEE)
         dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
         op_return_ascii = prompt_str("OP_RETURN ASCII hint (optional)", default="")
+        single_tx = False
+        mode_label = "MULTI-TX (frames)"
+        if choice == "2":
+            single_tx, mode_label = _prompt_send_mode()
 
         args = [
             "send-sequence" if choice == "2" else "plan-sequence",
@@ -289,8 +308,11 @@ def handle_numeric_sequences() -> None:
             args.extend(["--op-return-ascii", op_return_ascii])
         if dry_run:
             args.append("--dry-run")
+        if single_tx:
+            args.append("--single-tx")
 
         print(f"Running command: enigmatic-dgb {' '.join(args)}")
+        print(f"Mode: {mode_label}")
         code = run_enigmatic_cli(args)
         print(f"Command finished with exit code {code}\n")
         _pause()
@@ -298,6 +320,35 @@ def handle_numeric_sequences() -> None:
 
 def _format_amount(amount: float) -> str:
     return f"{amount:.8f}".rstrip("0").rstrip(".")
+
+
+def _collect_prime_burst_amounts() -> list[float]:
+    """Prompt for a set of ladder indices to include in a fan-out burst."""
+
+    print("Available ladder indices and ratios:")
+    for index, p, q, ratio in prime_ladder.iter_prime_pairs():
+        print(f"  [{index}] {p}/{q} = {ratio:.8f}")
+
+    while True:
+        raw_indices = prompt_str(
+            "Comma-separated ladder indices to include", default="0,1,2"
+        ).strip()
+        try:
+            indices = [int(piece.strip()) for piece in raw_indices.split(",") if piece.strip()]
+        except ValueError:
+            print("Invalid indices; please enter comma-separated integers.\n")
+            continue
+        if not indices:
+            print("Please provide at least one index.\n")
+            continue
+        amounts: list[float] = []
+        try:
+            for idx in indices:
+                amounts.append(prime_ladder.ladder_step_ratio(idx))
+        except (IndexError, ValueError) as exc:
+            print(f"Unable to compute ratios: {exc}\n")
+            continue
+        return amounts
 
 
 def handle_prime_ladder() -> None:
@@ -311,6 +362,7 @@ def handle_prime_ladder() -> None:
                 Prime ladder mode
                 [1] Plan prime ladder step
                 [2] Send prime ladder step
+                [3] Prime burst (fan-out reflection)
                 [B] Back
                 """
             )
@@ -318,8 +370,12 @@ def handle_prime_ladder() -> None:
         choice = input("Select an option: ").strip().lower()
         if choice in {"b", "0"}:
             return
-        if choice not in {"1", "2"}:
+        if choice not in {"1", "2", "3"}:
             print("Invalid selection, please try again.\n")
+            continue
+
+        if choice == "3":
+            _run_prime_burst()
             continue
 
         to_address = prompt_str("Destination address")
@@ -357,6 +413,10 @@ def handle_prime_ladder() -> None:
             )
         fee = prompt_float("Fee per transaction", default=0.21021)
         dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
+        single_tx = False
+        mode_label = "MULTI-TX (frames)"
+        if choice == "2":
+            single_tx, mode_label = _prompt_send_mode()
 
         amounts = [ratio]
         if balancing_amount is not None:
@@ -374,6 +434,7 @@ def handle_prime_ladder() -> None:
                 outputs: {amounts_csv}
                 fee: {fee}
                 mode: {mode}
+                transaction mode: {mode_label}
                 """
             )
         )
@@ -392,11 +453,69 @@ def handle_prime_ladder() -> None:
         ]
         if dry_run:
             args.append("--dry-run")
+        if single_tx:
+            args.append("--single-tx")
 
         print(f"Running command: enigmatic-dgb {' '.join(args)}")
         code = run_enigmatic_cli(args)
         print(f"Command finished with exit code {code}\n")
         _pause()
+
+
+def _run_prime_burst() -> None:
+    """Send a fan-out transaction containing multiple prime ladder ratios."""
+
+    print("\nPrime burst / reflection\n" + "-" * 30)
+    to_address = prompt_str("Destination address")
+    amounts = _collect_prime_burst_amounts()
+    extra_amounts_raw = prompt_str(
+        "Additional custom amounts (optional, comma-separated)", default=""
+    )
+    if extra_amounts_raw.strip():
+        try:
+            extra_amounts = [
+                float(piece.strip()) for piece in extra_amounts_raw.split(",") if piece.strip()
+            ]
+            amounts.extend(extra_amounts)
+        except ValueError:
+            print("Ignoring invalid custom amounts input; proceeding with ladder indices only.")
+
+    fee = prompt_float("Fee for the fan-out transaction", default=0.21021)
+    dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
+    amounts_csv = ",".join(_format_amount(value) for value in amounts)
+
+    print(
+        textwrap.dedent(
+            f"""
+            Prime burst summary
+            outputs: {amounts_csv}
+            fee: {fee}
+            mode: {'DRY RUN' if dry_run else 'BROADCAST'}
+            transaction mode: SINGLE-TX (fan-out)
+            """
+        )
+    )
+    if not _confirm():
+        print("Cancelled.\n")
+        return
+
+    args = [
+        "send-sequence",
+        "--to-address",
+        to_address,
+        "--amounts",
+        amounts_csv,
+        "--fee",
+        str(fee if fee is not None else DEFAULT_FEE),
+        "--single-tx",
+    ]
+    if dry_run:
+        args.append("--dry-run")
+
+    print(f"Running command: enigmatic-dgb {' '.join(args)}")
+    code = run_enigmatic_cli(args)
+    print(f"Command finished with exit code {code}\n")
+    _pause()
 
 
 def handle_dtsp_messaging() -> None:
@@ -1013,6 +1132,8 @@ def handle_help() -> None:
               * examples/ (dialects and sample configs)
               * DigiByte Transaction Signaling Protocol (DTSP) helpers for fee-plane
                 messaging with START/ACCEPT/END handshakes
+              * Prime burst mode: send a reflection of prior prime ladder steps in a
+                single transaction (fan-out) to avoid long ancestor chains
 
             RPC environment variables typically required:
               * DGB_RPC_USER

@@ -165,6 +165,60 @@ class TransactionBuilder:
         logger.info("Broadcasted transaction %s", txid)
         return txid
 
+    def send_multi_output_tx(
+        self,
+        to_address: str,
+        amounts: list[float],
+        fee: float,
+        op_return_data: list[str] | None = None,
+        script_plane: ScriptPlane | None = None,
+    ) -> str:
+        """Build and broadcast a single payment transaction with many outputs."""
+
+        if not amounts:
+            raise ValueError("At least one amount is required for multi-output transactions")
+
+        extra_log: Dict[str, Any] = {}
+        if script_plane is not None:
+            extra_log["script_plane"] = script_plane.to_dict()
+        logger.info(
+            "Building single fan-out transaction for %d outputs", len(amounts), extra=extra_log or None
+        )
+
+        total_output = sum(float(amount) for amount in amounts)
+        selected_utxos, change_amount = self.utxo_manager.select_utxos(total_output, fee)
+
+        tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
+        outputs_payload: list[Dict[str, Any]] = [
+            {to_address: round(float(amount), 8)} for amount in amounts
+        ]
+
+        if change_amount > 1e-8:
+            change_address = self.rpc.getnewaddress()
+            outputs_payload.append({change_address: round(change_amount, 8)})
+
+        if op_return_data:
+            for data in op_return_data:
+                outputs_payload.append({"data": data})
+
+        raw_tx = self.rpc.createrawtransaction(tx_inputs, outputs_payload)
+        signed = self.rpc.signrawtransactionwithwallet(raw_tx)
+        if not signed.get("complete"):
+            raise RuntimeError("Node failed to produce a complete signature set")
+        signed_hex = signed["hex"]
+
+        total_in = sum(u.amount for u in selected_utxos)
+        total_out = total_output + max(change_amount, 0)
+        actual_fee = total_in - total_out
+        if abs(actual_fee - fee) > 0.01:
+            logger.warning(
+                "Manual selection fee %.8f differs from requested %.8f", actual_fee, fee
+            )
+
+        txid = self.rpc.sendrawtransaction(signed_hex)
+        logger.info("Broadcasted transaction %s", txid)
+        return txid
+
     @staticmethod
     def _prepare_outputs_payload(
         outputs: Dict[str, float], op_return_data: list[str] | None
