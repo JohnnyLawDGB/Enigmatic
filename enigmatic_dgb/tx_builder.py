@@ -193,17 +193,19 @@ class TransactionBuilder:
         selected_utxos, change_amount = self.utxo_manager.select_utxos(total_output, fee)
 
         tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
-        outputs_payload: list[Dict[str, Any]] = [
-            {to_address: round(float(amount), 8)} for amount in amounts
-        ]
+        aggregated_outputs: Dict[str, float] = {}
+        for amount in amounts:
+            aggregated_outputs[to_address] = round(
+                aggregated_outputs.get(to_address, 0.0) + float(amount), 8
+            )
 
         if change_amount > 1e-8:
             change_address = self.rpc.getnewaddress()
-            outputs_payload.append({change_address: round(change_amount, 8)})
+            aggregated_outputs[change_address] = round(change_amount, 8)
 
-        if op_return_data:
-            for data in op_return_data:
-                outputs_payload.append({"data": data})
+        outputs_payload = self._prepare_outputs_payload(
+            aggregated_outputs, op_return_data
+        )
 
         raw_tx = self.rpc.createrawtransaction(tx_inputs, outputs_payload)
         signed = self.rpc.signrawtransactionwithwallet(raw_tx)
