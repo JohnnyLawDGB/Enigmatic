@@ -626,6 +626,7 @@ def plan_explicit_pattern(
     fee: Decimal,
     min_confirmations: int = 1,
     script_plane: ScriptPlane | None = None,
+    preferred_utxos: Sequence[Mapping[str, Any]] | None = None,
 ) -> PatternPlanSequence:
     if not amounts:
         raise PlanningError("At least one output amount must be provided")
@@ -642,7 +643,15 @@ def plan_explicit_pattern(
     if fee < 0:
         raise PlanningError("Fee must be non-negative")
     required_total = total_pattern + (fee * len(normalized_amounts))
-    utxos = rpc.listunspent(min_confirmations)
+    utxos = list(preferred_utxos) if preferred_utxos is not None else rpc.listunspent(min_confirmations)
+    if preferred_utxos is not None and min_confirmations > 0:
+        for entry in utxos:
+            confirmations = int(entry.get("confirmations", 0) or 0)
+            if confirmations < min_confirmations:
+                raise PlanningError(
+                    f"Selected UTXO {entry.get('txid')}:{entry.get('vout')} "
+                    f"only has {confirmations} confirmations (requires {min_confirmations})"
+                )
     selected, total = _select_utxos_covering_total(utxos, required_total)
     pattern_inputs = [
         PatternInput(

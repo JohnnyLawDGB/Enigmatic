@@ -26,11 +26,15 @@ class UTXOManager:
     def __init__(self, rpc: DigiByteRPC) -> None:
         self.rpc = rpc
 
-    def list_unspent(self, addresses: Iterable[str] | None = None) -> List[Dict[str, Any]]:
+    def list_unspent(
+        self, addresses: Iterable[str] | None = None, min_confirmations: int = 1
+    ) -> List[Dict[str, Any]]:
         addr_list = list(addresses) if addresses is not None else None
-        return self.rpc.listunspent(addresses=addr_list)
+        return self.rpc.listunspent(min_confirmations, addresses=addr_list)
 
-    def select_utxos(self, target_amount: float, fee: float) -> Tuple[List[UTXO], float]:
+    def select_utxos(
+        self, target_amount: float, fee: float, min_confirmations: int = 1
+    ) -> Tuple[List[UTXO], float]:
         """Select UTXOs to cover target amount + fee."""
 
         utxos = [
@@ -40,7 +44,7 @@ class UTXOManager:
                 amount=float(item["amount"]),
                 address=item.get("address"),
             )
-            for item in self.rpc.listunspent()
+            for item in self.rpc.listunspent(min_confirmations)
         ]
         if not utxos:
             raise RuntimeError("Wallet has no spendable UTXOs")

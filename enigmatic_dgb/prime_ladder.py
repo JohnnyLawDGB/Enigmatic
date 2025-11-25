@@ -6,7 +6,30 @@ from typing import Iterator, Sequence
 
 # A short, extendable sequence of primes observed in prime ladder patterns.
 # The list can be extended in future releases as additional ratios are used on-chain.
-PRIME_SEQUENCE: list[int] = [41, 47, 53, 59, 61, 67, 71, 73, 79, 83]
+PRIME_SEQUENCE: list[int] = [
+    41,
+    47,
+    53,
+    59,
+    61,
+    67,
+    71,
+    73,
+    79,
+    83,
+    89,
+    97,
+    101,
+    103,
+    107,
+    109,
+    113,
+    127,
+    131,
+    137,
+    139,
+    149,
+]
 
 
 def prime_ratio(p: int, q: int, decimals: int = 8) -> float:

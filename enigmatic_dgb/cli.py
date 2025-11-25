@@ -362,6 +362,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirmations required between chained steps (default: 0)",
     )
     pattern_parser.add_argument(
+        "--use-utxos",
+        help="Comma-separated txid:vout list to fund the pattern (skips automatic selection)",
+    )
+    pattern_parser.add_argument(
         "--max-wait-seconds",
         type=float,
         default=600.0,
@@ -383,6 +387,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     pattern_parser.set_defaults(rpc_use_https=None)
+
+    list_utxos_parser = subparsers.add_parser(
+        "list-utxos",
+        help="Display spendable UTXOs in the active wallet",
+    )
+    list_utxos_parser.add_argument(
+        "--min-confirmations",
+        type=int,
+        default=0,
+        help="Minimum confirmations to include (default: 0)",
+    )
+    list_utxos_parser.add_argument(
+        "--address",
+        help="Optional comma-separated address filter",
+    )
+    list_utxos_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the raw listunspent JSON",
+    )
+    list_utxos_parser.add_argument(
+        "--wallet-name",
+        "--rpc-wallet",
+        dest="rpc_wallet",
+        help="Override RPC wallet name",
+    )
+    list_utxos_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    list_utxos_parser.add_argument("--rpc-host", help="Override RPC host")
+    list_utxos_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    list_utxos_parser.add_argument("--rpc-user", help="Override RPC username")
+    list_utxos_parser.add_argument("--rpc-password", help="Override RPC password")
+    list_https_group = list_utxos_parser.add_mutually_exclusive_group()
+    list_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    list_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    list_utxos_parser.set_defaults(rpc_use_https=None)
 
     chain_parser = subparsers.add_parser(
         "plan-chain",
@@ -483,6 +535,63 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _configure_sequence_parser(plan_sequence_parser, include_mode_flags=False)
 
+    prepare_utxos_parser = subparsers.add_parser(
+        "prepare-utxos",
+        help="Carve new wallet-owned UTXOs for later signaling",
+    )
+    prepare_utxos_parser.add_argument(
+        "--amounts",
+        required=True,
+        help="Comma-separated list of UTXO amounts to create",
+    )
+    prepare_utxos_parser.add_argument(
+        "--fee",
+        default="0.21",
+        help="Transaction fee in DGB (default: 0.21)",
+    )
+    prepare_utxos_parser.add_argument(
+        "--use-utxos",
+        help="Comma-separated txid:vout list to fund the preparation transaction",
+    )
+    prepare_utxos_parser.add_argument(
+        "--min-confirmations",
+        type=int,
+        default=1,
+        help="Minimum confirmations required for funding UTXOs (default: 1)",
+    )
+    prepare_utxos_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build the transaction without broadcasting",
+    )
+    prepare_utxos_parser.add_argument(
+        "--wallet-name",
+        "--rpc-wallet",
+        dest="rpc_wallet",
+        help="Override RPC wallet name",
+    )
+    prepare_utxos_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    prepare_utxos_parser.add_argument("--rpc-host", help="Override RPC host")
+    prepare_utxos_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    prepare_utxos_parser.add_argument("--rpc-user", help="Override RPC username")
+    prepare_utxos_parser.add_argument("--rpc-password", help="Override RPC password")
+    prepare_https_group = prepare_utxos_parser.add_mutually_exclusive_group()
+    prepare_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    prepare_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    prepare_utxos_parser.set_defaults(rpc_use_https=None)
+
     return parser
 
 
@@ -503,6 +612,10 @@ def _configure_sequence_parser(parser: argparse.ArgumentParser, *, include_mode_
         type=int,
         default=1,
         help="Minimum confirmations required for funding UTXOs (default: 1)",
+    )
+    parser.add_argument(
+        "--use-utxos",
+        help="Comma-separated txid:vout list to fund the sequence (skips automatic selection)",
     )
     parser.add_argument(
         "--wait-between-txs",
@@ -571,6 +684,24 @@ def _parse_amounts_csv(raw: str) -> list[Decimal]:
     return amounts
 
 
+def _parse_utxo_refs(raw: str) -> list[tuple[str, int]]:
+    parts = _split_csv(raw)
+    if not parts:
+        raise CLIError("--use-utxos requires at least one txid:vout pair")
+    references: list[tuple[str, int]] = []
+    for piece in parts:
+        try:
+            txid, vout_str = piece.split(":", maxsplit=1)
+        except ValueError as exc:  # pragma: no cover - input validation
+            raise CLIError(f"Invalid UTXO reference: {piece}. Expected txid:vout") from exc
+        try:
+            vout = int(vout_str)
+        except ValueError as exc:  # pragma: no cover - input validation
+            raise CLIError(f"Invalid vout index in UTXO reference: {piece}") from exc
+        references.append((txid, vout))
+    return references
+
+
 def _split_csv(raw: str) -> list[str]:
     return [segment.strip() for segment in raw.split(",") if segment.strip()]
 
@@ -580,6 +711,27 @@ def _parse_decimal(value: str, flag: str) -> Decimal:
         return Decimal(value)
     except InvalidOperation as exc:  # pragma: no cover - input validation
         raise CLIError(f"{flag} must be a valid decimal value") from exc
+
+
+def _load_selected_utxos(
+    rpc: DigiByteRPC, utxo_spec: str | None, min_confirmations: int
+) -> list[dict[str, Any]]:
+    if not utxo_spec:
+        return []
+    references = _parse_utxo_refs(utxo_spec)
+    available = rpc.listunspent(min_confirmations)
+    indexed = {
+        (entry["txid"], int(entry["vout"])): entry
+        for entry in available
+        if entry.get("spendable", True)
+    }
+    missing = [ref for ref in references if ref not in indexed]
+    if missing:
+        missing_desc = ", ".join(f"{txid}:{vout}" for txid, vout in missing)
+        raise CLIError(
+            "Requested UTXOs not found or not spendable: " + missing_desc
+        )
+    return [indexed[ref] for ref in references]
 
 
 def _parse_max_frames(value: int | None) -> int | None:
@@ -962,6 +1114,44 @@ def _rpc_from_pattern_args(args: argparse.Namespace) -> DigiByteRPC:
     return DigiByteRPC(config)
 
 
+def cmd_list_utxos(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+    utxos = rpc.listunspent(args.min_confirmations)
+    address_filter = None
+    if getattr(args, "address", None):
+        address_filter = {entry for entry in _split_csv(args.address)}
+        utxos = [u for u in utxos if u.get("address") in address_filter]
+    if not utxos:
+        print("No matching UTXOs found.")
+        return
+    ordered = sorted(
+        utxos,
+        key=lambda u: (
+            float(u.get("amount", 0)),
+            int(u.get("confirmations", 0) or 0),
+        ),
+        reverse=True,
+    )
+    if getattr(args, "as_json", False):
+        print(json.dumps(ordered, indent=2))
+        return
+    print(
+        f"Found {len(ordered)} UTXOs (min_conf={args.min_confirmations})"
+        + (f" filtered by {', '.join(sorted(address_filter))}" if address_filter else "")
+    )
+    print(" idx |     amount | conf | spendable | txid:vout | address")
+    print("-----+------------+------+-----------+-------------------------------+-------------------------------")
+    for index, utxo in enumerate(ordered):
+        amount = float(utxo.get("amount", 0))
+        confirmations = int(utxo.get("confirmations", 0) or 0)
+        spendable = "Y" if utxo.get("spendable", True) else "N"
+        reference = f"{utxo.get('txid')}:{utxo.get('vout')}"
+        address = utxo.get("address", "") or "(change)"
+        print(
+            f"{index:>3} | {amount:>10.8f} | {confirmations:>4} | {spendable:^9} | {reference:<31} | {address}"
+        )
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
@@ -995,12 +1185,14 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
     rpc = _rpc_from_pattern_args(args)
+    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
     plan = plan_explicit_pattern(
         rpc,
         to_address=args.to_address,
         amounts=amounts,
         fee=fee,
         min_confirmations=args.min_confirmations,
+        preferred_utxos=selected_utxos or None,
     )
     print(json.dumps(plan.to_jsonable(), indent=2))
     if args.broadcast:
@@ -1013,6 +1205,43 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
             progress_callback=_stdout_progress,
         )
         print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
+
+
+def cmd_prepare_utxos(args: argparse.Namespace) -> None:
+    amounts = _parse_amounts_csv(args.amounts)
+    fee = _parse_decimal(args.fee, "--fee")
+    rpc = _rpc_from_pattern_args(args)
+    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
+    outputs: dict[str, float] = {
+        rpc.getnewaddress(): float(amount) for amount in amounts
+    }
+    builder = TransactionBuilder(rpc)
+    manual_inputs = (
+        [{"txid": entry["txid"], "vout": int(entry["vout"])} for entry in selected_utxos]
+        if selected_utxos
+        else None
+    )
+    signed_hex = builder.build_payment_tx(outputs, float(fee), inputs=manual_inputs)
+    result: dict[str, Any] = {
+        "outputs": outputs,
+        "fee": f"{fee:.8f}",
+    }
+    if selected_utxos:
+        result["inputs"] = [
+            {
+                "txid": entry["txid"],
+                "vout": int(entry["vout"]),
+                "amount": entry["amount"],
+            }
+            for entry in selected_utxos
+        ]
+    if args.dry_run:
+        result["hex"] = signed_hex
+        print(json.dumps(result, indent=2))
+        return
+    txid = rpc.sendrawtransaction(signed_hex)
+    result["txid"] = txid
+    print(json.dumps(result, separators=COMPACT_JSON_SEPARATORS))
 
 
 def cmd_plan_chain(args: argparse.Namespace) -> None:
@@ -1048,12 +1277,14 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
     fee = _parse_decimal(args.fee, "--fee")
     op_returns = _parse_op_return_args(args.op_return_hex, args.op_return_ascii, len(amounts))
     rpc = DigiByteRPC.from_env()
+    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
     plan = plan_explicit_pattern(
         rpc,
         to_address=args.to_address,
         amounts=amounts,
         fee=fee,
         min_confirmations=args.min_confirmations,
+        preferred_utxos=selected_utxos or None,
     )
     is_dry_run = getattr(args, "dry_run", False) or args.command == "plan-sequence"
     if is_dry_run:
@@ -1147,12 +1378,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_binary_encode(args)
         elif args.command == "binary-utxo-decode":
             cmd_binary_decode(args)
+        elif args.command == "list-utxos":
+            cmd_list_utxos(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
             cmd_plan_symbol(args)
         elif args.command == "plan-pattern":
             cmd_plan_pattern(args)
+        elif args.command == "prepare-utxos":
+            cmd_prepare_utxos(args)
         elif args.command == "plan-chain":
             cmd_plan_chain(args)
         elif args.command in {"send-sequence", "plan-sequence"}:
