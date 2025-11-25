@@ -523,6 +523,13 @@ def _configure_sequence_parser(parser: argparse.ArgumentParser, *, include_mode_
         help="Maximum time to wait for confirmations before aborting (default: 600)",
     )
     parser.add_argument(
+        "--single-tx",
+        action="store_true",
+        help=(
+            "If set, build a single transaction with multiple outputs instead of one tx per amount."
+        ),
+    )
+    parser.add_argument(
         "--op-return-hex",
         help="Comma-separated list of OP_RETURN payloads encoded as hex",
     )
@@ -1063,6 +1070,7 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
         max_wait_seconds=args.max_wait_seconds,
         progress_callback=_stdout_progress,
         builder=builder,
+        single_tx=args.single_tx,
     )
     print(json.dumps({"txids": txids}, separators=COMPACT_JSON_SEPARATORS))
 

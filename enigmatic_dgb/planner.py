@@ -718,6 +718,7 @@ def broadcast_pattern_plan(
     max_wait_seconds: float | None = None,
     progress_callback: ProgressCallback | None = None,
     builder: TransactionBuilder | None = None,
+    single_tx: bool = False,
 ) -> list[str]:
     """Broadcast a chained pattern plan using the transaction builder."""
 
@@ -726,6 +727,53 @@ def broadcast_pattern_plan(
 
     tx_builder = builder or TransactionBuilder(rpc)
     txids: list[str] = []
+
+    if single_tx:
+        if not plan.steps:
+            return []
+
+        primary_outputs = [step.outputs[0] for step in plan.steps]
+        destination_addresses = {output.address for output in primary_outputs}
+        if len(destination_addresses) != 1:
+            raise PlanningError("Single fan-out mode requires a consistent destination address")
+        to_address = destination_addresses.pop()
+
+        fanout_fee = plan.steps[0].fee
+        if any(step.fee != fanout_fee for step in plan.steps):
+            raise PlanningError("Single fan-out mode requires a uniform fee across frames")
+
+        script_planes = {step.script_plane for step in plan.steps}
+        script_plane = script_planes.pop() if len(script_planes) == 1 else None
+        if len(script_planes) > 1:
+            raise PlanningError("Single fan-out mode does not support mixed script planes")
+
+        payload = None
+        if op_returns is not None:
+            non_null_payloads = [value for value in op_returns if value]
+            if len(non_null_payloads) > 1:
+                raise PlanningError(
+                    "Single fan-out mode supports at most one OP_RETURN payload across frames"
+                )
+            payload = non_null_payloads[0] if non_null_payloads else None
+
+        amounts = [output.amount for output in primary_outputs]
+        if progress_callback is not None:
+            progress_callback(
+                f"Building single fan-out transaction with {len(amounts)} outputs and fee {fanout_fee}"
+            )
+
+        payload_list = [payload] if payload else None
+        txid = tx_builder.send_multi_output_tx(
+            to_address,
+            amounts,
+            float(fanout_fee),
+            op_return_data=payload_list,
+            script_plane=script_plane,
+        )
+        txids.append(txid)
+        if progress_callback is not None:
+            progress_callback(f"Broadcasted fan-out transaction {txid}")
+        return txids
     previous_change_ref: tuple[str, int] | None = None
     for index, step in enumerate(plan.steps, start=1):
         rpc_inputs = _resolve_chained_inputs(step.inputs, previous_change_ref)
