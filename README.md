@@ -84,6 +84,9 @@ All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
 - **Plan chained frames from a dialect**: `enigmatic-dgb plan-chain`
 - **Plan or send explicit sequences**: `enigmatic-dgb plan-sequence` /
   `enigmatic-dgb send-sequence` and `enigmatic-dgb plan-pattern`
+- **UTXO utilities**: `enigmatic-dgb list-utxos` to inspect funding options, and
+  `enigmatic-dgb prepare-utxos` plus `--use-utxos` flags to carve and reuse
+  wallet-owned inputs for later signaling
 - **Free-form intents**: `enigmatic-dgb send-message`
 - **Observation and decoding**: `enigmatic-dgb watch`, `dtsp-*`,
   `binary-utxo-*`
