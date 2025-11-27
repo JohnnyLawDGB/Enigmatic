@@ -2018,7 +2018,12 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
                 {}, float(estimated_fee), op_return_data=[inscription_hex]
             )
         else:
-            outputs_payload = [{"script": inscription_hex, "amount": 0.0001}]
+            try:
+                inscription_address = rpc.getnewaddress(address_type="bech32m")
+            except TypeError:  # pragma: no cover - older node compatibility
+                inscription_address = rpc.getnewaddress()
+
+            outputs_payload = [{inscription_address: 0.0001}]
             raw_tx = builder.build_custom_tx(outputs_payload, float(estimated_fee))
     except RuntimeError as exc:
         raise CLIError(
