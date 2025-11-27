@@ -78,7 +78,7 @@ class OrdinalIndexer:
             yield self.rpc_client.getblock_by_height(height)
             yielded += 1
 
-    def _scan_block(self, block_json: dict) -> List[OrdinalLocation]:
+    def _scan_block(self, block_json: dict, config: OrdinalScanConfig) -> List[OrdinalLocation]:
         """Inspect a decoded block for inscription-style outputs.
 
         This placeholder walks transaction shells but intentionally performs no
@@ -90,9 +90,52 @@ class OrdinalIndexer:
         """
 
         candidate_locations: List[OrdinalLocation] = []
-        for _tx in block_json.get("tx", []):
-            # TODO: Inspect outputs and witness data for inscription markers.
-            continue
+        block_height = block_json.get("height")
+
+        for tx in block_json.get("tx", []):
+            txid = tx.get("txid") or tx.get("hash")
+            if txid is None:
+                continue
+
+            for vout in tx.get("vout", []):
+                if config.limit is not None and len(candidate_locations) >= config.limit:
+                    return candidate_locations
+
+                script_pub_key = vout.get("scriptPubKey", {})
+                script_type = script_pub_key.get("type")
+                asm = script_pub_key.get("asm", "") or ""
+                vout_index = vout.get("n", 0)
+
+                is_op_return = script_type == "nulldata" or asm.strip().upper().startswith("OP_RETURN")
+                if config.include_op_return and is_op_return:
+                    candidate_locations.append(
+                        OrdinalLocation(
+                            txid=txid,
+                            vout=vout_index,
+                            height=block_height,
+                            ordinal_hint="op_return",
+                            tags={"op_return", "inscription_candidate"},
+                        )
+                    )
+                    if config.limit is not None and len(candidate_locations) >= config.limit:
+                        return candidate_locations
+
+                if config.include_taproot_like:
+                    from enigmatic_dgb.ordinals import taproot
+
+                    taproot_view = taproot.inspect_output_for_taproot(self.rpc_client, txid, vout_index)
+                    if taproot_view.is_taproot_like:
+                        candidate_locations.append(
+                            OrdinalLocation(
+                                txid=txid,
+                                vout=vout_index,
+                                height=block_height,
+                                ordinal_hint="taproot_like",
+                                tags={"taproot_like", "inscription_candidate"},
+                            )
+                        )
+                        if config.limit is not None and len(candidate_locations) >= config.limit:
+                            return candidate_locations
 
         return candidate_locations
 
@@ -111,7 +154,25 @@ class OrdinalIndexer:
             A list of candidate :class:`OrdinalLocation` instances.
         """
 
-        raise NotImplementedError("Range scanning is not implemented yet")
+        best_height = self.rpc_client.get_best_height()
+        start_height = config.start_height if config.start_height is not None else 0
+        end_height = config.end_height if config.end_height is not None else best_height
+
+        locations: List[OrdinalLocation] = []
+
+        for height in range(start_height, end_height + 1):
+            if config.limit is not None and len(locations) >= config.limit:
+                break
+
+            block_json = self.rpc_client.getblock_by_height(height)
+            block_locations = self._scan_block(block_json, config)
+            locations.extend(block_locations)
+
+            if config.limit is not None and len(locations) >= config.limit:
+                locations = locations[: config.limit]
+                break
+
+        return locations
 
     def scan_tx(self, txid: str) -> List[OrdinalLocation]:
         """Inspect a single transaction for ordinal-style outputs.
@@ -129,4 +190,14 @@ class OrdinalIndexer:
             empty if no inscription-style data is detected.
         """
 
-        raise NotImplementedError("Transaction scanning is not implemented yet")
+        verbose_tx = self.rpc_client.get_raw_transaction(txid, verbose=True)
+        pseudo_block = {"tx": [verbose_tx], "height": verbose_tx.get("height")}
+        config = OrdinalScanConfig(
+            start_height=None,
+            end_height=None,
+            limit=None,
+            include_op_return=True,
+            include_taproot_like=True,
+        )
+
+        return self._scan_block(pseudo_block, config)
