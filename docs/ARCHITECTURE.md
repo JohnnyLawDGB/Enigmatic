@@ -32,12 +32,22 @@
 * Polls the DigiByte node for activity touching configured addresses.
 * Converts new activity into `ObservedTx`, groups packets, and emits decoded `EnigmaticMessage` objects via callbacks.
 
-### 1.7 CLI (`enigmatic_dgb.cli`)
+### 1.7 Ordinal-style inscription tooling (`enigmatic_dgb/ordinals/`)
+* Optional, experimental layer for observing and decoding inscription-like data (OP_RETURN payloads and Taproot-style witness segments).
+* Reuses the shared `rpc_client` utilities to walk blocks/transactions without altering consensus rules.
+* Sits alongside `watcher.py` (observation) and `decoder.py` (decoding) as a research-focused path for inscription discovery.
+```
+[rpc_client]
+    |-- watcher.py --> decoder.py (address-focused flows)
+    \-- ordinals/indexer.py --> ordinals/decoder.py (inscription-like flows)
+```
+
+### 1.8 CLI (`enigmatic_dgb.cli`)
 * Exposes `enigmatic-dgb` entry point with `send-message` and `watch` subcommands.
 * `send-message` orchestrates encoding plus transaction submission.
 * `watch` runs the RPC-based watcher and prints decoded packets as JSON lines.
 
-### 1.8 Tests (`tests/`)
+### 1.9 Tests (`tests/`)
 * `test_enigmatic_roundtrip.py` covers encoder/decoder interoperability and packet grouping heuristics.
 
 ## 2. Data flow

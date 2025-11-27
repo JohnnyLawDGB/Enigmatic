@@ -119,8 +119,15 @@ class RPCConfig:
         )
 
 
-class DigiByteRPC:
-    """Minimal JSON-RPC client for DigiByte Core compatible nodes."""
+class DigiByteRPCClient:
+    """Typed JSON-RPC client for DigiByte Core compatible nodes.
+
+    The client is intentionally thin: each helper maps directly to an RPC
+    method exposed by the node and returns the parsed JSON response. The
+    methods below cover the common read paths used throughout Enigmatic,
+    including convenience helpers for verbose transaction decoding and block
+    retrieval by height.
+    """
 
     def __init__(self, config: RPCConfig) -> None:
         self.config = config
@@ -129,7 +136,7 @@ class DigiByteRPC:
         self._wallet = config.wallet
 
     @classmethod
-    def from_env(cls) -> "DigiByteRPC":
+    def from_env(cls) -> "DigiByteRPCClient":
         """Instantiate a client using environment variables."""
 
         return cls(RPCConfig.from_env())
@@ -194,8 +201,24 @@ class DigiByteRPC:
     def getrawtransaction(self, txid: str, verbose: bool = False) -> Any:
         return self.call("getrawtransaction", [txid, int(verbose)])
 
+    def getrawtransaction_verbose(self, txid: str) -> Dict[str, Any]:
+        """Fetch and decode a transaction in a single RPC call."""
+
+        return self.getrawtransaction(txid, verbose=True)
+
     def decoderawtransaction(self, raw_tx: str) -> Dict[str, Any]:
         return self.call("decoderawtransaction", [raw_tx])
+
+    def getblock_by_height(self, height: int) -> Dict[str, Any]:
+        """Retrieve a block JSON payload by height using verbosity=2."""
+
+        block_hash = self.getblockhash(height)
+        return self.getblock(block_hash, verbosity=2)
+
+    def get_best_height(self) -> int:
+        """Return the current best chain height."""
+
+        return int(self.getblockcount())
 
     def listunspent(
         self,
@@ -247,3 +270,7 @@ class DigiByteRPC:
 
     def sendrawtransaction(self, raw_tx: str) -> str:
         return self.call("sendrawtransaction", [raw_tx])
+
+
+# Backward compatibility alias until downstream code is updated.
+DigiByteRPC = DigiByteRPCClient
