@@ -165,6 +165,7 @@ def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: Automa
     inputs, outputs = rpc.last_tx
     assert len(inputs) == symbol.inputs
     assert len(outputs) == symbol.outputs
+    assert all(len(entry) == 1 for entry in outputs)
 
 
 def test_symbol_plan_explicit_block_target(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
