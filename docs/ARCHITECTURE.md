@@ -43,9 +43,10 @@
 ```
 
 ### 1.8 CLI (`enigmatic_dgb.cli`)
-* Exposes `enigmatic-dgb` entry point with `send-message` and `watch` subcommands.
+* Exposes `enigmatic-dgb` entry point with `send-message`, `watch`, and the `ord-*` subcommands.
 * `send-message` orchestrates encoding plus transaction submission.
 * `watch` runs the RPC-based watcher and prints decoded packets as JSON lines.
+* Ordinal helpers (`ord-scan`, `ord-index`, `ord-mine`, `ord-decode`, `ord-plan-*`, `ord-inscribe`) reuse the shared RPC client for OP_RETURN and Taproot-dialect payloads. Broadcasting is opt-in for inscription creation, guarded by fee caps and warnings; `--verbose` emits detailed RPC traces for troubleshooting.
 
 ### 1.9 Tests (`tests/`)
 * `test_enigmatic_roundtrip.py` covers encoder/decoder interoperability and packet grouping heuristics.

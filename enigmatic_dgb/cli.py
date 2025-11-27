@@ -59,7 +59,13 @@ from .ordinals import (
     OrdinalScanConfig,
 )
 from .ordinals.index_store import SQLiteOrdinalIndexStore
-from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
+from .rpc_client import (
+    ConfigurationError,
+    DigiByteRPC,
+    RPCConfig,
+    RPCError,
+    RPCTransportError,
+)
 from .script_plane import ScriptPlane
 from .session import SessionContext
 from .symbol_sender import SessionRequiredError, prepare_symbol_send
@@ -89,16 +95,25 @@ def _parse_decimal_list(raw: str) -> list[Decimal]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Enigmatic DigiByte CLI")
+    parser.add_argument(
+        "--verbose",
+        "--debug",
+        action="store_true",
+        help="Increase logging verbosity and include RPC call details",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser(
-        "console", help="Launch the interactive Enigmatic console (ASCII menu UI)",
+        "console",
+        help="Launch the interactive Enigmatic console (ASCII menu UI)",
     )
 
     send_parser = subparsers.add_parser(
         "send-message", help="encode a message and broadcast the spend pattern"
     )
-    send_parser.add_argument("--to-address", required=True, help="Destination DGB address")
+    send_parser.add_argument(
+        "--to-address", required=True, help="Destination DGB address"
+    )
     send_parser.add_argument(
         "--intent",
         required=True,
@@ -220,7 +235,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the dialect YAML file",
     )
     symbol_parser.add_argument("--symbol", required=True, help="Symbol name")
-    symbol_parser.add_argument("--to-address", required=True, help="Destination address")
+    symbol_parser.add_argument(
+        "--to-address", required=True, help="Destination address"
+    )
     symbol_parser.add_argument("--channel", default="default", help="Channel name")
     symbol_parser.add_argument(
         "--extra-payload-json",
@@ -325,7 +342,9 @@ def build_parser() -> argparse.ArgumentParser:
         "plan-pattern",
         help="Plan or broadcast an explicit payment pattern",
     )
-    pattern_parser.add_argument("--to-address", required=True, help="Destination DGB address")
+    pattern_parser.add_argument(
+        "--to-address", required=True, help="Destination DGB address"
+    )
     pattern_parser.add_argument(
         "--amounts",
         required=True,
@@ -447,14 +466,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     ord_scan_parser = subparsers.add_parser(
         "ord-scan",
-        help="Scan a block range for ordinal-style inscription candidates (experimental)",
+        help="Scan a block range for ordinal-style inscription candidates (non-consensus)",
         description=(
             "Inspect DigiByte blocks for conventional inscription carriers. "
-            "This is a non-consensus, research-only surface for OP_RETURN and "
-            "Taproot-style payload discovery."
+            "Start with a small height window (--limit 5) and expand once RPC connectivity "
+            "is confirmed. Results are non-consensus hints that can optionally be cached locally."
         ),
     )
-    ord_scan_parser.add_argument("--start-height", type=int, help="Starting block height")
+    ord_scan_parser.add_argument(
+        "--start-height", type=int, help="Starting block height"
+    )
     ord_scan_parser.add_argument("--end-height", type=int, help="Ending block height")
     ord_scan_parser.add_argument(
         "--limit",
@@ -532,7 +553,8 @@ def build_parser() -> argparse.ArgumentParser:
         "ord-index",
         help="Interact with the local ordinal inscription index",
         description=(
-            "Query a cached view of previously decoded inscriptions. No RPC calls are performed; data is read from the local SQLite index."
+            "Query a cached view of previously decoded inscriptions. No RPC calls are performed; all data comes from the local "
+            "SQLite index created via ord-scan --update-index."
         ),
     )
     ord_index_parser.add_argument(
@@ -541,39 +563,51 @@ def build_parser() -> argparse.ArgumentParser:
             "Optional path to the ordinal index database (default: ~/.enigmatic-dgb/ordinals.sqlite)"
         ),
     )
-    ord_index_subparsers = ord_index_parser.add_subparsers(dest="ord_index_command", required=True)
+    ord_index_subparsers = ord_index_parser.add_subparsers(
+        dest="ord_index_command", required=True
+    )
 
     ord_index_list = ord_index_subparsers.add_parser(
         "list",
         help="List cached inscriptions from the local index",
     )
-    ord_index_list.add_argument("--limit", type=int, default=20, help="Maximum rows to return (default: 20)")
-    ord_index_list.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
+    ord_index_list.add_argument(
+        "--limit", type=int, default=20, help="Maximum rows to return (default: 20)"
+    )
+    ord_index_list.add_argument(
+        "--json", dest="as_json", action="store_true", help="Emit JSON output"
+    )
 
     ord_index_show = ord_index_subparsers.add_parser(
         "show",
         help="Show inscriptions for a transaction from the index",
     )
     ord_index_show.add_argument("txid", help="Transaction id to display")
-    ord_index_show.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
+    ord_index_show.add_argument(
+        "--json", dest="as_json", action="store_true", help="Emit JSON output"
+    )
 
     ord_index_by_address = ord_index_subparsers.add_parser(
         "by-address",
         help="List indexed inscriptions filtered by address",
     )
-    ord_index_by_address.add_argument("address", help="Output address recorded in the index")
+    ord_index_by_address.add_argument(
+        "address", help="Output address recorded in the index"
+    )
     ord_index_by_address.add_argument(
         "--limit", type=int, default=10, help="Maximum rows to return (default: 10)"
     )
-    ord_index_by_address.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
+    ord_index_by_address.add_argument(
+        "--json", dest="as_json", action="store_true", help="Emit JSON output"
+    )
 
     ord_decode_parser = subparsers.add_parser(
         "ord-decode",
         help="Decode inscription-style payloads from a transaction (experimental)",
         description=(
             "Render OP_RETURN and Enigmatic Taproot dialect payloads without "
-            "claiming ordinal consensus. This helper is advisory and may evolve "
-            "as the dialect matures."
+            "claiming ordinal consensus. Start with --json or a specific --vout when testing new data to "
+            "avoid noisy output."
         ),
     )
     ord_decode_parser.add_argument("txid", help="Transaction id to inspect")
@@ -622,7 +656,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Plan-only helper for OP_RETURN inscriptions. This does not sign or "
             "broadcast a transaction and should be treated as a convention-only "
-            "preview."
+            "preview. Use this before attempting ord-inscribe."
         ),
     )
     ord_plan_op_return_parser.add_argument(
@@ -639,13 +673,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit the inscription plan as JSON",
     )
-    ord_plan_op_return_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_plan_op_return_parser.add_argument(
+        "--rpc-url", help="Override RPC endpoint URL"
+    )
     ord_plan_op_return_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_plan_op_return_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_plan_op_return_parser.add_argument(
+        "--rpc-port", type=int, help="Override RPC port"
+    )
     ord_plan_op_return_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_plan_op_return_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_plan_op_return_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    ord_plan_op_return_https_group = ord_plan_op_return_parser.add_mutually_exclusive_group()
+    ord_plan_op_return_parser.add_argument(
+        "--rpc-password", help="Override RPC password"
+    )
+    ord_plan_op_return_parser.add_argument(
+        "--rpc-wallet", help="Override RPC wallet name"
+    )
+    ord_plan_op_return_https_group = (
+        ord_plan_op_return_parser.add_mutually_exclusive_group()
+    )
     ord_plan_op_return_https_group.add_argument(
         "--rpc-use-https",
         dest="rpc_use_https",
@@ -668,7 +712,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Plan-only helper for the Enigmatic Taproot Dialect v1. Output is an "
             "unsatisfied leaf script and funding sketch; it is experimental and "
-            "may change in future dialect versions."
+            "may change in future dialect versions. Run this before signing to validate payload size and costs."
         ),
     )
     ord_plan_taproot_parser.add_argument(
@@ -688,13 +732,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ord_plan_taproot_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
     ord_plan_taproot_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_plan_taproot_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_plan_taproot_parser.add_argument("--rpc-user", help="Override RPC username")
     ord_plan_taproot_parser.add_argument(
-        "--rpc-password", help="Override RPC password"
+        "--rpc-port", type=int, help="Override RPC port"
     )
-    ord_plan_taproot_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    ord_plan_taproot_https_group = ord_plan_taproot_parser.add_mutually_exclusive_group()
+    ord_plan_taproot_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_plan_taproot_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_plan_taproot_parser.add_argument(
+        "--rpc-wallet", help="Override RPC wallet name"
+    )
+    ord_plan_taproot_https_group = (
+        ord_plan_taproot_parser.add_mutually_exclusive_group()
+    )
     ord_plan_taproot_https_group.add_argument(
         "--rpc-use-https",
         dest="rpc_use_https",
@@ -713,11 +761,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     ord_inscribe_parser = subparsers.add_parser(
         "ord-inscribe",
-        help="Create, sign, and optionally broadcast an inscription (experimental, irreversible)",
+        help="Create, sign, and optionally broadcast an inscription (broadcast opt-in)",
         description=(
             "Build and sign a real inscription transaction. Broadcasting is opt-in; "
             "inscriptions are permanent and may bloat the chain. Review fees and "
-            "payloads carefully before proceeding."
+            "payloads carefully before proceeding and start with a dry run."
         ),
     )
     ord_inscribe_parser.add_argument(
@@ -743,19 +791,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--broadcast",
         dest="broadcast",
         action="store_true",
-        default=True,
-        help="Broadcast the signed inscription transaction (default)",
+        help="Broadcast the signed inscription transaction (explicit opt-in)",
     )
     ord_inscribe_broadcast.add_argument(
         "--no-broadcast",
         dest="broadcast",
         action="store_false",
-        help="Dry-run: print the raw signed transaction without broadcasting",
+        help="Dry-run: print the raw signed transaction without broadcasting (default)",
     )
     ord_inscribe_parser.add_argument(
         "--max-fee-sats",
         type=int,
-        help="Abort if the estimated fee exceeds this many satoshis",
+        default=250000,
+        help="Abort if the estimated fee exceeds this many satoshis (default: %(default)s)",
     )
     ord_inscribe_parser.add_argument(
         "--wallet-name",
@@ -783,7 +831,7 @@ def build_parser() -> argparse.ArgumentParser:
         const=False,
         help="Force HTTP when contacting the node",
     )
-    ord_inscribe_parser.set_defaults(rpc_use_https=None)
+    ord_inscribe_parser.set_defaults(rpc_use_https=None, broadcast=False)
 
     ord_mine_parser = subparsers.add_parser(
         "ord-mine",
@@ -794,14 +842,18 @@ def build_parser() -> argparse.ArgumentParser:
             "heuristics."
         ),
     )
-    ord_mine_parser.add_argument("--wallet", help="Wallet name or identifier to pull addresses from")
+    ord_mine_parser.add_argument(
+        "--wallet", help="Wallet name or identifier to pull addresses from"
+    )
     ord_mine_parser.add_argument(
         "--address",
         action="append",
         dest="address",
         help="Address to scan for inscriptions (repeatable)",
     )
-    ord_mine_parser.add_argument("--start-height", type=int, help="Starting block height")
+    ord_mine_parser.add_argument(
+        "--start-height", type=int, help="Starting block height"
+    )
     ord_mine_parser.add_argument("--end-height", type=int, help="Ending block height")
     ord_mine_parser.add_argument(
         "--limit",
@@ -1023,7 +1075,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _configure_sequence_parser(parser: argparse.ArgumentParser, *, include_mode_flags: bool) -> None:
+def _configure_sequence_parser(
+    parser: argparse.ArgumentParser, *, include_mode_flags: bool
+) -> None:
     parser.add_argument("--to-address", required=True, help="Destination DGB address")
     parser.add_argument(
         "--amounts",
@@ -1107,7 +1161,9 @@ def _parse_amounts_csv(raw: str) -> list[Decimal]:
         try:
             amount = Decimal(part)
         except InvalidOperation as exc:  # pragma: no cover - input validation
-            raise CLIError(f"Amount #{index + 1} is not a valid decimal value: {part}") from exc
+            raise CLIError(
+                f"Amount #{index + 1} is not a valid decimal value: {part}"
+            ) from exc
         amounts.append(amount)
     return amounts
 
@@ -1121,7 +1177,9 @@ def _parse_utxo_refs(raw: str) -> list[tuple[str, int]]:
         try:
             txid, vout_str = piece.split(":", maxsplit=1)
         except ValueError as exc:  # pragma: no cover - input validation
-            raise CLIError(f"Invalid UTXO reference: {piece}. Expected txid:vout") from exc
+            raise CLIError(
+                f"Invalid UTXO reference: {piece}. Expected txid:vout"
+            ) from exc
         try:
             vout = int(vout_str)
         except ValueError as exc:  # pragma: no cover - input validation
@@ -1156,9 +1214,7 @@ def _load_selected_utxos(
     missing = [ref for ref in references if ref not in indexed]
     if missing:
         missing_desc = ", ".join(f"{txid}:{vout}" for txid, vout in missing)
-        raise CLIError(
-            "Requested UTXOs not found or not spendable: " + missing_desc
-        )
+        raise CLIError("Requested UTXOs not found or not spendable: " + missing_desc)
     return [indexed[ref] for ref in references]
 
 
@@ -1241,9 +1297,14 @@ def _normalize_hex(value: str) -> str:
 
 
 def _print_symbol_summary(
-    message: EnigmaticMessage, outputs: dict[str, float], op_returns: list[str], fee: float
+    message: EnigmaticMessage,
+    outputs: dict[str, float],
+    op_returns: list[str],
+    fee: float,
 ) -> None:
-    print(f"Symbol summary for {message.payload.get('symbol', message.intent)} on {message.channel}")
+    print(
+        f"Symbol summary for {message.payload.get('symbol', message.intent)} on {message.channel}"
+    )
     for address, amount in outputs.items():
         print(f"  → {_format_decimal(Decimal(str(amount)))} DGB to {address}")
     if op_returns:
@@ -1259,12 +1320,15 @@ def _print_symbol_summary(
     print(f"  Fee punctuation: {_format_decimal(Decimal(str(fee)))} DGB")
 
 
-def _print_sequence_summary(plan: PatternPlanSequence, op_returns: Sequence[str | None]) -> None:
+def _print_sequence_summary(
+    plan: PatternPlanSequence, op_returns: Sequence[str | None]
+) -> None:
     print("Sequence plan:")
     for index, step in enumerate(plan.steps, start=1):
         input_total = sum(entry.amount for entry in step.inputs)
         outputs_desc = ", ".join(
-            f"{_format_decimal(output.amount)} → {output.address}" for output in step.outputs
+            f"{_format_decimal(output.amount)} → {output.address}"
+            for output in step.outputs
         )
         if not outputs_desc:
             outputs_desc = "(no value outputs)"
@@ -1310,7 +1374,9 @@ def _execute_sequence_plan(
                     raise CLIError(
                         "Chained plan referenced a change output before it was created"
                     )
-                inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+                inputs.append(
+                    {"txid": previous_change_ref[0], "vout": previous_change_ref[1]}
+                )
             else:
                 inputs.append({"txid": entry.txid, "vout": entry.vout})
         ordered_outputs: OrderedDict[str, float] = OrderedDict()
@@ -1319,7 +1385,9 @@ def _execute_sequence_plan(
         change_index: int | None = None
         if step.change_output is not None:
             change_index = len(step.outputs)
-            ordered_outputs[step.change_output.address] = float(step.change_output.amount)
+            ordered_outputs[step.change_output.address] = float(
+                step.change_output.amount
+            )
         payload = op_returns[index]
         op_return_list = [payload] if payload else None
         txid = builder.send_payment_tx(
@@ -1465,7 +1533,9 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
     session: SessionContext | None = None
     if args.session_key_b64:
         if not args.session_id:
-            raise CLIError("--session-id is required when --session-key-b64 is provided")
+            raise CLIError(
+                "--session-id is required when --session-key-b64 is provided"
+            )
         try:
             session_key = base64.urlsafe_b64decode(args.session_key_b64.encode("ascii"))
         except (binascii.Error, ValueError) as exc:
@@ -1516,7 +1586,9 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
     print(json.dumps({"txids": [txid]}, separators=COMPACT_JSON_SEPARATORS))
 
 
-def _rpc_from_automation_args(args: argparse.Namespace, automation_endpoint: str, automation_wallet: str | None) -> DigiByteRPC:
+def _rpc_from_automation_args(
+    args: argparse.Namespace, automation_endpoint: str, automation_wallet: str | None
+) -> DigiByteRPC:
     config = RPCConfig.from_sources(
         user=args.rpc_user,
         password=args.rpc_password,
@@ -1565,10 +1637,16 @@ def cmd_list_utxos(args: argparse.Namespace) -> None:
         return
     print(
         f"Found {len(ordered)} UTXOs (min_conf={args.min_confirmations})"
-        + (f" filtered by {', '.join(sorted(address_filter))}" if address_filter else "")
+        + (
+            f" filtered by {', '.join(sorted(address_filter))}"
+            if address_filter
+            else ""
+        )
     )
     print(" idx |     amount | conf | spendable | txid:vout | address")
-    print("-----+------------+------+-----------+-------------------------------+-------------------------------")
+    print(
+        "-----+------------+------+-----------+-------------------------------+-------------------------------"
+    )
     for index, utxo in enumerate(ordered):
         amount = float(utxo.get("amount", 0))
         confirmations = int(utxo.get("confirmations", 0) or 0)
@@ -1589,6 +1667,7 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
         include_op_return=args.include_op_return,
         include_taproot_like=args.include_taproot_like,
     )
+    logger.debug("ord-scan config: %s", config)
     indexer = OrdinalIndexer(rpc)
     locations = indexer.scan_range(config)
     index_updates = 0
@@ -1609,7 +1688,9 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
                     loc = payload.metadata.location
                     if (loc.txid, loc.vout) not in target_locations:
                         continue
-                    index_store.add_inscription(payload, address=address_map.get(loc.vout))
+                    index_store.add_inscription(
+                        payload, address=address_map.get(loc.vout)
+                    )
                     index_updates += 1
 
     if getattr(args, "as_json", False):
@@ -1648,7 +1729,9 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
 
     if getattr(args, "update_index", False):
         if index_updates:
-            print(f"Indexed {index_updates} inscription payload(s) into {index_store_path}")
+            print(
+                f"Indexed {index_updates} inscription payload(s) into {index_store_path}"
+            )
         else:
             print("No inscription payloads were decoded for indexing.")
 
@@ -1680,12 +1763,22 @@ def cmd_ord_mine(args: argparse.Namespace) -> None:
         include_op_return=args.include_op_return,
         include_taproot_like=args.include_taproot_like,
     )
+    logger.debug(
+        "ord-mine config: %s | wallet=%s | addresses=%s",
+        config,
+        args.wallet,
+        args.address,
+    )
 
     payloads: list[InscriptionPayload]
     if args.wallet:
-        payloads = ownership_view.find_inscriptions_for_wallet(args.wallet, scan_config=config)
+        payloads = ownership_view.find_inscriptions_for_wallet(
+            args.wallet, scan_config=config
+        )
     elif args.address:
-        payloads = ownership_view.find_inscriptions_for_addresses(args.address, scan_config=config)
+        payloads = ownership_view.find_inscriptions_for_addresses(
+            args.address, scan_config=config
+        )
     else:
         raise CLIError("Provide either --wallet or at least one --address to scan")
 
@@ -1712,12 +1805,22 @@ def cmd_ord_mine(args: argparse.Namespace) -> None:
         print("No inscriptions found for the provided wallet/addresses.")
         return
 
-    print(" height | txid                                 | vout | protocol              | content type       | preview")
-    print("-------+--------------------------------------+------+-" + "-" * 20 + "+--------------------+--------------------------------")
+    print(
+        " height | txid                                 | vout | protocol              | content type       | preview"
+    )
+    print(
+        "-------+--------------------------------------+------+-"
+        + "-" * 20
+        + "+--------------------+--------------------------------"
+    )
     for payload in payloads:
         metadata = payload.metadata
-        height = metadata.location.height if metadata.location.height is not None else "-"
-        preview = payload.decoded_text or (json.dumps(payload.decoded_json) if payload.decoded_json else "")
+        height = (
+            metadata.location.height if metadata.location.height is not None else "-"
+        )
+        preview = payload.decoded_text or (
+            json.dumps(payload.decoded_json) if payload.decoded_json else ""
+        )
         if preview:
             preview = preview.replace("\n", " ").strip()
             if len(preview) > 40:
@@ -1733,6 +1836,7 @@ def cmd_ord_mine(args: argparse.Namespace) -> None:
 def cmd_ord_decode(args: argparse.Namespace) -> None:
     rpc = _rpc_from_pattern_args(args)
     decoder = OrdinalInscriptionDecoder(rpc)
+    logger.debug("ord-decode tx=%s vout=%s", args.txid, args.vout)
     payloads = decoder.decode_from_tx(args.txid)
     if args.vout is not None:
         payloads = [
@@ -1782,7 +1886,9 @@ def cmd_ord_decode(args: argparse.Namespace) -> None:
             preview = _preview_text(payload.decoded_text)
             print(f"  decoded_text: {preview}")
         if payload.decoded_json is not None:
-            print(f"  decoded_json: {json.dumps(payload.decoded_json, separators=COMPACT_JSON_SEPARATORS)}")
+            print(
+                f"  decoded_json: {json.dumps(payload.decoded_json, separators=COMPACT_JSON_SEPARATORS)}"
+            )
         if args.raw:
             print(f"  raw_hex: {payload.raw_payload.hex()}")
 
@@ -1874,6 +1980,14 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     payload = _parse_inscription_message(args.message)
     metadata = {"content_type": args.content_type}
 
+    logger.debug(
+        "ord-inscribe scheme=%s content_type=%s broadcast=%s max_fee_sats=%s",
+        args.scheme,
+        args.content_type,
+        args.broadcast,
+        args.max_fee_sats,
+    )
+
     if args.scheme == "op-return":
         plan = planner.plan_op_return_inscription(payload, metadata=metadata)
         inscription_hex = payload.hex()
@@ -1881,7 +1995,9 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
         plan = planner.plan_taproot_inscription(payload, metadata=metadata)
         inscription_hex = plan.get("metadata", {}).get("taproot_script_hex")
         if not inscription_hex:
-            raise CLIError("Planner did not emit a Taproot inscription script; aborting")
+            raise CLIError(
+                "Planner did not emit a Taproot inscription script; aborting"
+            )
 
     estimated_fee = _extract_estimated_fee(plan)
     if estimated_fee is None:
@@ -1892,21 +2008,31 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     print(
         "WARNING: inscriptions are permanent, may increase chain bloat, and the payload/fee is your responsibility."
     )
+    print(
+        "Tip: run with --no-broadcast (default) and a low --max-fee-sats to review the signed hex before relaying."
+    )
 
     try:
         if args.scheme == "op-return":
-            raw_tx = builder.build_payment_tx({}, float(estimated_fee), op_return_data=[inscription_hex])
+            raw_tx = builder.build_payment_tx(
+                {}, float(estimated_fee), op_return_data=[inscription_hex]
+            )
         else:
             outputs_payload = [{"script": inscription_hex, "amount": 0.0001}]
             raw_tx = builder.build_custom_tx(outputs_payload, float(estimated_fee))
     except RuntimeError as exc:
-        raise CLIError(f"Failed to build or sign the inscription transaction: {exc}") from exc
+        raise CLIError(
+            f"Failed to build or sign the inscription transaction: {exc}"
+        ) from exc
 
     if not args.broadcast:
         print("Broadcast disabled (--no-broadcast). Signed transaction (hex):")
         print(raw_tx)
         return
 
+    print(
+        "Broadcasting with --broadcast; consider running a tiny test inscription before large payloads."
+    )
     try:
         txid = rpc.sendrawtransaction(raw_tx)
     except RPCError as exc:
@@ -1917,7 +2043,9 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
 
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
-    rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
+    rpc = _rpc_from_automation_args(
+        args, dialect.automation.endpoint, dialect.automation.wallet
+    )
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
     max_frames = _parse_max_frames(args.max_frames)
@@ -1948,7 +2076,9 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
     rpc = _rpc_from_pattern_args(args)
-    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
+    selected_utxos = _load_selected_utxos(
+        rpc, getattr(args, "use_utxos", None), args.min_confirmations
+    )
     plan = plan_explicit_pattern(
         rpc,
         to_address=args.to_address,
@@ -1974,13 +2104,18 @@ def cmd_prepare_utxos(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
     rpc = _rpc_from_pattern_args(args)
-    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
+    selected_utxos = _load_selected_utxos(
+        rpc, getattr(args, "use_utxos", None), args.min_confirmations
+    )
     outputs: dict[str, float] = {
         rpc.getnewaddress(): float(amount) for amount in amounts
     }
     builder = TransactionBuilder(rpc)
     manual_inputs = (
-        [{"txid": entry["txid"], "vout": int(entry["vout"])} for entry in selected_utxos]
+        [
+            {"txid": entry["txid"], "vout": int(entry["vout"])}
+            for entry in selected_utxos
+        ]
         if selected_utxos
         else None
     )
@@ -2011,7 +2146,9 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
     """Plan or broadcast a chained symbol defined in an automation dialect."""
 
     dialect = AutomationDialect.load(args.dialect_path)
-    rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
+    rpc = _rpc_from_automation_args(
+        args, dialect.automation.endpoint, dialect.automation.wallet
+    )
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
     max_frames = _parse_max_frames(args.max_frames)
@@ -2038,9 +2175,13 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
 def cmd_send_sequence(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
-    op_returns = _parse_op_return_args(args.op_return_hex, args.op_return_ascii, len(amounts))
+    op_returns = _parse_op_return_args(
+        args.op_return_hex, args.op_return_ascii, len(amounts)
+    )
     rpc = DigiByteRPC.from_env()
-    selected_utxos = _load_selected_utxos(rpc, getattr(args, "use_utxos", None), args.min_confirmations)
+    selected_utxos = _load_selected_utxos(
+        rpc, getattr(args, "use_utxos", None), args.min_confirmations
+    )
     plan = plan_explicit_pattern(
         rpc,
         to_address=args.to_address,
@@ -2075,9 +2216,7 @@ def _print_chain_summary(plan: PlannedChain) -> None:
     if plan.initial_utxos:
         print("Funding UTXOs:")
         for utxo in plan.initial_utxos:
-            print(
-                f"  - {utxo.txid}:{utxo.vout} → {_format_decimal(utxo.amount)} DGB"
-            )
+            print(f"  - {utxo.txid}:{utxo.vout} → {_format_decimal(utxo.amount)} DGB")
     for index, tx in enumerate(plan.transactions, start=1):
         change_desc = (
             f"change {_format_decimal(tx.change_output.amount)} → {tx.change_output.address}"
@@ -2180,11 +2319,15 @@ def _print_index_payloads(payloads: list[InscriptionPayload], as_json: bool) -> 
         " height | txid                                 | vout | protocol              | content type       | address               | preview"
     )
     print(
-        "-------+--------------------------------------+------+-" + "-" * 20 + "+--------------------+-----------------------+--------------------"
+        "-------+--------------------------------------+------+-"
+        + "-" * 20
+        + "+--------------------+-----------------------+--------------------"
     )
     for payload in payloads:
         metadata = payload.metadata
-        height = metadata.location.height if metadata.location.height is not None else "-"
+        height = (
+            metadata.location.height if metadata.location.height is not None else "-"
+        )
         preview = payload.decoded_text or ""
         preview = _preview_text(preview.replace("\n", " ").strip() or "-", limit=40)
         protocol = metadata.protocol or "-"
@@ -2216,6 +2359,10 @@ def _enforce_fee_cap(estimated_fee_dgb: float, fee_cap_sats: int | None) -> None
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    logging.getLogger().setLevel(
+        logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
+    )
     try:
         if args.command == "console":
             from .console import console_main
@@ -2271,6 +2418,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         CLIError,
         ConfigurationError,
         RPCError,
+        RPCTransportError,
         RuntimeError,
         DialectError,
         PlanningError,

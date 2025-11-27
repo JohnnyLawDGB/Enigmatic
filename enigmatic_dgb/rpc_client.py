@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
-from requests import Response
+from requests import RequestException, Response
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,10 @@ class RPCError(RuntimeError):
 
 class ConfigurationError(RuntimeError):
     """Raised when configuration is invalid."""
+
+
+class RPCTransportError(RuntimeError):
+    """Raised when the RPC endpoint is unreachable or returns malformed data."""
 
 
 @dataclass
@@ -111,11 +115,11 @@ class RPCConfig:
         resolved_https = (
             use_https
             if use_https is not None
-            else endpoint_https
-            if endpoint_https is not None
-            else env_https
-            if env_https is not None
-            else False
+            else (
+                endpoint_https
+                if endpoint_https is not None
+                else env_https if env_https is not None else False
+            )
         )
         resolved_wallet = wallet or env_wallet
         return cls(
@@ -160,15 +164,31 @@ class DigiByteRPCClient:
             "params": params or [],
         }
         logger.debug("RPC call %s params=%s", method, params)
-        response = self._session.post(
-            self._url,
-            data=json.dumps(payload),
-            headers={"content-type": "application/json"},
-            auth=(self.config.user, self.config.password),
-            timeout=30,
-        )
-        self._raise_for_status(response)
-        result = response.json()
+        try:
+            response = self._session.post(
+                self._url,
+                data=json.dumps(payload),
+                headers={"content-type": "application/json"},
+                auth=(self.config.user, self.config.password),
+                timeout=30,
+            )
+        except RequestException as exc:
+            logger.debug("RPC connection failed: %s", exc, exc_info=True)
+            raise RPCTransportError(
+                "RPC connection failed. Verify the node is reachable and credentials are correct."
+            ) from exc
+        try:
+            self._raise_for_status(response)
+        except requests.HTTPError as exc:
+            logger.debug("RPC HTTP error: %s", exc, exc_info=True)
+            raise RPCTransportError(
+                "RPC server returned an HTTP error; check the URL, wallet path, and authentication."
+            ) from exc
+        try:
+            result = response.json()
+        except ValueError as exc:
+            logger.debug("RPC JSON parse error: %s", response.text, exc_info=True)
+            raise RPCTransportError("RPC server returned malformed JSON") from exc
         if result.get("error"):
             error = result["error"]
             raise RPCError(error.get("code", -1), error.get("message", "unknown"))
@@ -258,7 +278,9 @@ class DigiByteRPCClient:
     def getbalance(self) -> float:
         return self.call("getbalance")
 
-    def gettransaction(self, txid: str, include_watchonly: bool = True) -> Dict[str, Any]:
+    def gettransaction(
+        self, txid: str, include_watchonly: bool = True
+    ) -> Dict[str, Any]:
         return self.call("gettransaction", [txid, include_watchonly])
 
     def createrawtransaction(
@@ -268,7 +290,9 @@ class DigiByteRPCClient:
     ) -> str:
         return self.call("createrawtransaction", [inputs, outputs])
 
-    def fundrawtransaction(self, raw_tx: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def fundrawtransaction(
+        self, raw_tx: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         params: list[Any] = [raw_tx]
         if options is not None:
             params.append(options)
