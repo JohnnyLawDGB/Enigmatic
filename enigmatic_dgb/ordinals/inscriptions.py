@@ -2,7 +2,9 @@
 
 This module focuses on retrieving inscription payloads and translating them into
 structured metadata. It does not implement a canonical ordinal numbering scheme;
-all behavior is experimental and subject to iteration.
+all behavior is experimental, non-consensus, and subject to iteration. The
+Enigmatic Taproot Dialect v1 envelope is intentionally simple and may evolve as
+the research surface expands.
 """
 
 from __future__ import annotations
@@ -10,7 +12,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from enigmatic_dgb.rpc_client import DigiByteRPCClient
 
 
 ENIG_TAPROOT_MAGIC = b"ENIG"
@@ -19,11 +24,12 @@ ENIG_TAPROOT_PROTOCOL = "enigmatic/taproot-v1"
 
 
 def encode_enig_taproot_payload(content_type: str, payload: bytes) -> bytes:
-    """Encode a taproot inscription envelope per ``docs/taproot-dialect-v1.md``.
+    """Encode a Taproot inscription envelope per ``docs/taproot-dialect-v1.md``.
 
     The payload layout is ``ENIG`` magic + 1-byte version + 1-byte content-type
     length + UTF-8 content-type string + raw payload bytes. The version emitted
-    by this helper is ``ENIG_TAPROOT_VERSION_V1``.
+    by this helper is ``ENIG_TAPROOT_VERSION_V1``. This is a conventional,
+    non-consensus encoding and may change in future dialect revisions.
     """
 
     if not isinstance(content_type, str):
@@ -49,7 +55,9 @@ def decode_enig_taproot_payload(data: bytes) -> Tuple[int, str, bytes]:
 
     Validates the ``ENIG`` magic, parses the version byte and content-type
     header, and returns a tuple of ``(version, content_type, payload_bytes)``.
-    Raises :class:`ValueError` with clear messages when parsing fails.
+    Raises :class:`ValueError` with clear messages when parsing fails. The
+    decoding path is permissive and does not attempt consensus-style validation
+    of Taproot semantics beyond the dialect envelope.
     """
 
     if not isinstance(data, (bytes, bytearray)):
@@ -113,10 +121,14 @@ class OrdinalInscriptionDecoder:
 
     This decoder is intentionally lightweight; it wires RPC retrieval into
     placeholder payload extraction routines. Future implementations can layer in
-    stricter protocol detection and content decoding.
+    stricter protocol detection and content decoding. All behavior remains
+    experimental and should be treated as advisory rather than consensus
+    validation.
     """
 
-    def __init__(self, rpc_client) -> None:
+    def __init__(self, rpc_client: "DigiByteRPCClient") -> None:
+        """Create a decoder backed by an RPC client."""
+
         self.rpc_client = rpc_client
 
     def decode_from_tx(self, txid: str) -> List[InscriptionPayload]:
@@ -157,7 +169,8 @@ class OrdinalInscriptionPlanner:
     that future revisions can integrate tightly with :mod:`planner` and
     :mod:`tx_builder` without changing the call sites. The returned dictionaries
     are intended for CLI inspection and carry enough hints for operators to
-    understand what the *eventual* transaction would look like.
+    understand what the *eventual* transaction would look like. All outputs are
+    non-consensus conventions meant for experimentation.
     """
 
     DEFAULT_FEE_ESTIMATE = 0.001  # Placeholder until tx_builder integration
@@ -377,7 +390,9 @@ class OrdinalInscriptionPlanner:
 
 
 def _extract_candidate_payloads_from_tx(
-    tx_json: Dict[str, Any], locations: List[OrdinalLocation], rpc_client=None
+    tx_json: Dict[str, Any],
+    locations: List[OrdinalLocation],
+    rpc_client: "DigiByteRPCClient" | None = None,
 ) -> List[InscriptionPayload]:
     """Extract candidate inscription payloads from a transaction.
 

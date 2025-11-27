@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+"""Typed JSON-RPC client for DigiByte Core nodes.
+
+The helpers in this module back both the core Enigmatic encoding/decoding flows
+and the experimental ordinal/inscription explorers. Configuration is shared via
+environment variables so CLI commands and library callers reuse a consistent
+connection surface. No consensus logic is implemented here; the client simply
+forwards well-typed requests and surfaces errors clearly.
+"""
+
 import json
 import logging
 import os

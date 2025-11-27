@@ -23,5 +23,7 @@ OP_ENDIF
 - **Content type (length-prefixed UTF-8)**: A MIME-like string describing the payload (examples: `text/plain`, `application/json`). The length prefix is a single byte, limiting the header to 255 bytes.
 - **Payload bytes**: The raw inscription content. Applications SHOULD weigh payload size against fee costs and on-chain footprint.
 
+Implementations SHOULD use `encode_enig_taproot_payload` and `decode_enig_taproot_payload` in `enigmatic_dgb.ordinals` to preserve the exact header layout. Version bumps will be reflected in those helpers first.
+
 ## Notes
 Version 1 intentionally keeps the envelope minimal: a fixed magic, 1-byte version, a short content type header, and arbitrary payload bytes. Larger payloads increase transaction fees and may face relay/policy limits; authors should account for size and economic impacts when crafting inscriptions.
