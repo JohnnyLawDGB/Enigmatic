@@ -125,13 +125,21 @@ class OrdinalIndexer:
 
                     taproot_view = taproot.inspect_output_for_taproot(self.rpc_client, txid, vout_index)
                     if taproot_view.is_taproot_like:
+                        taproot_tags = {"taproot_like", "inscription_candidate"}
+                        if taproot_view.script_pubkey_type:
+                            taproot_tags.add(f"script_type:{taproot_view.script_pubkey_type}")
+                        if taproot_view.control_block_hex:
+                            taproot_tags.add("taproot_control_block_detected")
+                        if taproot_view.leaf_script_hex:
+                            taproot_tags.add("taproot_leaf_script_detected")
+
                         candidate_locations.append(
                             OrdinalLocation(
                                 txid=txid,
                                 vout=vout_index,
                                 height=block_height,
-                                ordinal_hint="taproot_like",
-                                tags={"taproot_like", "inscription_candidate"},
+                                ordinal_hint=taproot_view.script_pubkey_type or "taproot_like",
+                                tags=taproot_tags,
                             )
                         )
                         if config.limit is not None and len(candidate_locations) >= config.limit:
