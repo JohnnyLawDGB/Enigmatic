@@ -56,7 +56,9 @@ wallet before broadcasting so the transaction builder can sign each frame.
 | `send-sequence` / `plan-sequence` | Chained explicit sequences with optional OP_RETURN hints. |
 | `watch` | Observe an address and stream decoded packets. |
 | `ord-scan` | Scan a block range for OP_RETURN and Taproot-style inscription candidates (experimental). |
+| `ord-index` | Query the local inscription cache built via `ord-scan --update-index`. |
 | `ord-decode` | Decode inscription-style payloads from a transaction (experimental). |
+| `ord-mine` | Discover inscriptions paying to your wallet or provided addresses (best-effort). |
 | `ord-plan-op-return` | Draft an OP_RETURN inscription envelope without broadcasting (experimental). |
 | `ord-plan-taproot` | Draft an Enigmatic Taproot Dialect v1 inscription leaf and funding sketch (experimental). |
 | `ord-inscribe` | Build, sign, and optionally broadcast an inscription transaction (experimental, irreversible). |
@@ -231,9 +233,10 @@ enigmatic-dgb ord-inscribe "hello chain" --scheme op-return --no-broadcast --max
 enigmatic-dgb ord-inscribe 0x68656c6c6f --content-type text/plain --scheme taproot --max-fee-sats 400000
 ```
 
-Use `--no-broadcast` to validate funding and signatures without relaying. Add
-`--max-fee-sats` to abort when the estimated fee exceeds your budget. Broadcasting
-is enabled by default; the CLI prints a warning before submission so you can
+Use `--no-broadcast` (the default) to validate funding and signatures without
+relaying. Add `--max-fee-sats` (defaults to `250000`) to abort when the estimated
+fee exceeds your budget. Supply `--broadcast` only after reviewing the signed hex
+and fee estimate; the CLI prints a warning before submission so you can
 double-check the payload and fee.
 
 ## 8. Integrating wallets & RPC setups
@@ -255,6 +258,20 @@ double-check the payload and fee.
   change outputs in memory until the prior frame confirms.
 - If a broadcast fails, re-run the identical `plan-*` command to confirm no
   wallet state drift occurred between planning and submission.
+- Troubleshooting quick hits:
+  - **RPC unreachable**: verify `DGB_RPC_*` variables, wallet path, and node
+    availability; add `--verbose` to surface transport errors.
+  - **Wallet not funded or locked**: ensure the target wallet is loaded and
+    unlocked, and that spendable UTXOs exist for the configured
+    `--min-confirmations` window.
+  - **Max fee cap triggered**: reduce inscription payload size or raise
+    `--max-fee-sats` after confirming current mempool fees.
+  - **No inscriptions found**: widen the block range, loosen
+    `--include-op-return` / `--include-taproot-like` filters, or run
+    `ord-scan --update-index` to refresh the cache before `ord-index`/`ord-mine`
+    calls.
+  - **Local index empty**: ensure `~/.enigmatic-dgb/ordinals.sqlite` exists or
+    pass `--index-path` to `ord-scan --update-index` to rebuild it.
 
 ## 10. References
 
