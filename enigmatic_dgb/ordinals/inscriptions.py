@@ -10,7 +10,77 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+
+ENIG_TAPROOT_MAGIC = b"ENIG"
+ENIG_TAPROOT_VERSION_V1 = 1
+ENIG_TAPROOT_PROTOCOL = "enigmatic/taproot-v1"
+
+
+def encode_enig_taproot_payload(content_type: str, payload: bytes) -> bytes:
+    """Encode a taproot inscription envelope per ``docs/taproot-dialect-v1.md``.
+
+    The payload layout is ``ENIG`` magic + 1-byte version + 1-byte content-type
+    length + UTF-8 content-type string + raw payload bytes. The version emitted
+    by this helper is ``ENIG_TAPROOT_VERSION_V1``.
+    """
+
+    if not isinstance(content_type, str):
+        raise ValueError("content_type must be a string")
+    if not isinstance(payload, (bytes, bytearray)):
+        raise ValueError("payload must be bytes")
+
+    content_type_bytes = content_type.encode("utf-8")
+    if len(content_type_bytes) > 255:
+        raise ValueError("content_type is too long; must fit in one byte of length")
+
+    return (
+        ENIG_TAPROOT_MAGIC
+        + bytes([ENIG_TAPROOT_VERSION_V1])
+        + bytes([len(content_type_bytes)])
+        + content_type_bytes
+        + bytes(payload)
+    )
+
+
+def decode_enig_taproot_payload(data: bytes) -> Tuple[int, str, bytes]:
+    """Decode an inscription envelope per ``docs/taproot-dialect-v1.md``.
+
+    Validates the ``ENIG`` magic, parses the version byte and content-type
+    header, and returns a tuple of ``(version, content_type, payload_bytes)``.
+    Raises :class:`ValueError` with clear messages when parsing fails.
+    """
+
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("data must be bytes")
+    if len(data) < len(ENIG_TAPROOT_MAGIC) + 2:
+        raise ValueError("data too short to contain Enigmatic taproot envelope")
+    if not data.startswith(ENIG_TAPROOT_MAGIC):
+        raise ValueError("missing ENIG taproot magic")
+
+    cursor = len(ENIG_TAPROOT_MAGIC)
+    version = data[cursor]
+    cursor += 1
+
+    if cursor >= len(data):
+        raise ValueError("missing content_type length byte")
+
+    content_length = data[cursor]
+    cursor += 1
+
+    if len(data) < cursor + content_length:
+        raise ValueError("data too short for declared content_type length")
+
+    content_type_bytes = data[cursor : cursor + content_length]
+    try:
+        content_type = content_type_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("content_type is not valid UTF-8") from exc
+
+    payload_bytes = data[cursor + content_length :]
+
+    return version, content_type, payload_bytes
 
 from enigmatic_dgb.ordinals.indexer import OrdinalIndexer, OrdinalLocation
 
@@ -21,6 +91,7 @@ class InscriptionMetadata:
 
     location: OrdinalLocation
     protocol: str
+    version: Optional[int]
     content_type: Optional[str]
     length: Optional[int]
     codec: Optional[str]
@@ -263,6 +334,7 @@ def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List
             metadata = InscriptionMetadata(
                 location=location,
                 protocol="enigmatic/experimental",
+                version=None,
                 content_type=None,
                 length=len(raw_bytes),
                 codec="raw-hex",
@@ -284,6 +356,7 @@ def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List
             metadata = InscriptionMetadata(
                 location=location,
                 protocol="enigmatic/experimental",
+                version=None,
                 content_type=None,
                 length=len(witness_bytes),
                 codec="raw-witness",
