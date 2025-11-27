@@ -79,11 +79,13 @@ class RPCConfig:
         """Assemble a config from CLI overrides, environment, and dialect defaults."""
 
         env = os.environ
-        resolved_user = user or env.get("DGB_RPC_USER")
-        resolved_password = password or env.get("DGB_RPC_PASSWORD")
+        resolved_user = user or env.get("ENIGMATIC_DGB_RPC_USER") or env.get("DGB_RPC_USER")
+        resolved_password = password or env.get("ENIGMATIC_DGB_RPC_PASSWORD") or env.get(
+            "DGB_RPC_PASSWORD"
+        )
         if not resolved_user or not resolved_password:
             raise ConfigurationError(
-                "DGB_RPC_USER and DGB_RPC_PASSWORD must be provided via arguments or environment"
+                "RPC credentials must be provided via arguments or ENIGMATIC_DGB_RPC_*/DGB_RPC_* environment variables"
             )
 
         endpoint_host: str | None = None
@@ -96,16 +98,18 @@ class RPCConfig:
             if parsed.scheme:
                 endpoint_https = parsed.scheme.lower() == "https"
 
-        env_host = env.get("DGB_RPC_HOST")
-        env_port_str = env.get("DGB_RPC_PORT")
+        env_host = env.get("ENIGMATIC_DGB_RPC_HOST") or env.get("DGB_RPC_HOST")
+        env_port_str = env.get("ENIGMATIC_DGB_RPC_PORT") or env.get("DGB_RPC_PORT")
         env_port = None
         if env_port_str:
             try:
                 env_port = int(env_port_str)
             except ValueError as exc:
                 raise ConfigurationError("DGB_RPC_PORT must be an integer") from exc
-        env_wallet = env.get("DGB_RPC_WALLET")
-        env_https_raw = env.get("DGB_RPC_USE_HTTPS")
+        env_wallet = env.get("ENIGMATIC_DGB_RPC_WALLET") or env.get("DGB_RPC_WALLET")
+        env_https_raw = env.get("ENIGMATIC_DGB_RPC_USE_HTTPS") or env.get(
+            "DGB_RPC_USE_HTTPS"
+        )
         env_https: bool | None = None
         if env_https_raw is not None:
             env_https = env_https_raw.lower() in {"1", "true", "yes"}
@@ -140,6 +144,12 @@ class DigiByteRPCClient:
     methods below cover the common read paths used throughout Enigmatic,
     including convenience helpers for verbose transaction decoding and block
     retrieval by height.
+
+    Connection defaults can be overridden via the environment variables
+    ``ENIGMATIC_DGB_RPC_USER``, ``ENIGMATIC_DGB_RPC_PASSWORD``,
+    ``ENIGMATIC_DGB_RPC_HOST``, and ``ENIGMATIC_DGB_RPC_PORT``. These mirror
+    the values typically placed in ``~/.digibyte/digibyte.conf`` and take
+    precedence over any baked-in defaults.
     """
 
     def __init__(self, config: RPCConfig) -> None:
@@ -194,8 +204,17 @@ class DigiByteRPCClient:
             raise RPCError(error.get("code", -1), error.get("message", "unknown"))
         return result.get("result")
 
-    @staticmethod
-    def _raise_for_status(response: Response) -> None:
+    def _raise_for_status(self, response: Response) -> None:
+        # DigiByte Core surfaces JSON-RPC errors as HTTP 500; logging the
+        # structured error body here makes debugging far more actionable.
+        if not response.ok:
+            try:
+                err_body = response.json()
+            except Exception:
+                err_body = response.text
+
+            logger.error("RPC HTTP error %s from %s", response.status_code, response.url)
+            logger.error("RPC error body: %s", err_body)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
