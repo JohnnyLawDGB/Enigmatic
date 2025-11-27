@@ -171,6 +171,21 @@ enigmatic-dgb ord-decode <txid>
 Taproot-aware parsing is experimental and may not recognize all inscription
 formats.
 
+### Taproot inscription planning
+
+Use the plan-only Taproot helper to sketch an inscription following the
+Enigmatic Taproot Dialect v1. It connects to the DigiByte node using the same
+RPC flags as other ordinal commands and **does not sign or broadcast** the
+transaction.
+
+```bash
+# Plan a text/plain inscription
+enigmatic-dgb ord-plan-taproot "hello taproot"
+
+# Plan a binary payload with a custom content type and JSON output
+enigmatic-dgb ord-plan-taproot 0x68656c6c6f --content-type application/octet-stream --json
+```
+
 ## 8. Integrating wallets & RPC setups
 
 - For **mainnet/testnet switching**, override `--rpc-port` and `--rpc-wallet`
