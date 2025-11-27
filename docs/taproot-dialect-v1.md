@@ -27,3 +27,16 @@ Implementations SHOULD use `encode_enig_taproot_payload` and `decode_enig_taproo
 
 ## Notes
 Version 1 intentionally keeps the envelope minimal: a fixed magic, 1-byte version, a short content type header, and arbitrary payload bytes. Larger payloads increase transaction fees and may face relay/policy limits; authors should account for size and economic impacts when crafting inscriptions.
+
+## Discovering my inscriptions
+The experimental CLI can search for inscriptions that land in your wallet's UTXOs or a set of explicit addresses using `ord-mine`:
+
+```bash
+# Scan a wallet's UTXOs between block 3,000,000 and 3,010,000
+enigmatic-dgb ord-mine --wallet mywallet --start-height 3000000 --end-height 3010000 --limit 25
+
+# Scan explicit addresses with JSON output
+enigmatic-dgb ord-mine --address dgb1qexample... --address dgb1qanother... --json
+```
+
+The current implementation performs a straightforward block walk using the same heuristics as `ord-scan`. Future revisions will add smarter indexing and caching once the patterns stabilize.

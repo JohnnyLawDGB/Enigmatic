@@ -18,6 +18,7 @@ from enigmatic_dgb.ordinals.inscriptions import (
     decode_enig_taproot_payload,
     encode_enig_taproot_payload,
 )
+from enigmatic_dgb.ordinals.ownership import OrdinalOwnershipView
 from enigmatic_dgb.ordinals.taproot import TaprootScriptView, inspect_output_for_taproot
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "OrdinalScanConfig",
     "OrdinalInscriptionDecoder",
     "OrdinalInscriptionPlanner",
+    "OrdinalOwnershipView",
     "InscriptionMetadata",
     "InscriptionPayload",
     "encode_enig_taproot_payload",
