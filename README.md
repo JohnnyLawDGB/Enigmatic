@@ -59,6 +59,18 @@ enigmatic-dgb --help
 pytest
 ```
 
+### Single-command bootstrap (prompts for RPC creds)
+
+To skip the manual setup steps above, source the helper script once per shell
+session. It will create or reuse `.venv`, install editable dependencies, and
+prompt for `DGB_RPC_USER`/`DGB_RPC_PASSWORD` without launching the console.
+
+```bash
+source scripts/bootstrap_console_env.sh
+# Then start the console when ready:
+enigmatic-dgb console
+```
+
 The ASCII console defaults to **dry-run/testing mode** for planner and sender
 flows so you can review the planned state vector for each command before
 issuing a broadcast flag. Outside the console, use `--dry-run` with
