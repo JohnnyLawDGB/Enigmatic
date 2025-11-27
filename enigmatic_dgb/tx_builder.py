@@ -93,7 +93,9 @@ class TransactionBuilder:
         )
         if inputs is not None:
             prepared_outputs = self._prepare_outputs_payload(outputs, op_return_data)
-            raw_tx = self.rpc.createrawtransaction(inputs, prepared_outputs)
+            formatted_outputs = self._format_outputs_for_rpc(prepared_outputs)
+            # DigiByte/Bitcoin RPC: each outputs entry must be an object with exactly one key (address->amount or data->hex).
+            raw_tx = self.rpc.createrawtransaction(inputs, formatted_outputs)
             selected_utxos: List[UTXO] = []
             change_amount = 0.0
         else:
@@ -104,10 +106,11 @@ class TransactionBuilder:
             raw_tx: str | None = None
 
             prepared_outputs = self._prepare_outputs_payload(outputs, op_return_data)
+            formatted_outputs = self._format_outputs_for_rpc(prepared_outputs)
 
             try:
                 logger.debug("Attempting automatic funding via fundrawtransaction")
-                tmp_raw = self.rpc.createrawtransaction([], prepared_outputs)
+                tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 fee_rate = self._estimate_fee_rate(fee)
                 funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
                 raw_tx = funded["hex"]
@@ -129,6 +132,7 @@ class TransactionBuilder:
                     outputs[change_address] = round(change_amount, 8)
 
                 manual_outputs = self._prepare_outputs_payload(outputs, op_return_data)
+                manual_outputs = self._format_outputs_for_rpc(manual_outputs)
 
                 raw_tx = self.rpc.createrawtransaction(tx_inputs, manual_outputs)
 
@@ -173,11 +177,13 @@ class TransactionBuilder:
         logger.info("Building custom transaction with %d output entries", len(outputs_payload))
 
         raw_tx: str | None = None
+        formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
+
         if inputs is not None:
-            raw_tx = self.rpc.createrawtransaction(inputs, outputs_payload)
+            raw_tx = self.rpc.createrawtransaction(inputs, formatted_outputs)
         else:
             try:
-                tmp_raw = self.rpc.createrawtransaction([], outputs_payload)
+                tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 fee_rate = self._estimate_fee_rate(fee)
                 funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
                 raw_tx = funded["hex"]
@@ -250,8 +256,9 @@ class TransactionBuilder:
         outputs_payload = self._prepare_outputs_payload(
             aggregated_outputs, op_return_data
         )
+        formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
 
-        raw_tx = self.rpc.createrawtransaction(tx_inputs, outputs_payload)
+        raw_tx = self.rpc.createrawtransaction(tx_inputs, formatted_outputs)
         signed = self.rpc.signrawtransactionwithwallet(raw_tx)
         if not signed.get("complete"):
             raise RuntimeError("Node failed to produce a complete signature set")
@@ -279,6 +286,35 @@ class TransactionBuilder:
         for data in op_return_data:
             payload.append({"data": data})
         return payload
+
+    @staticmethod
+    def _format_outputs_for_rpc(
+        outputs_payload: list[Dict[str, Any]] | Dict[str, Any]
+    ) -> list[Dict[str, Any]]:
+        """Return outputs formatted as an array of single-key objects for RPC."""
+
+        if isinstance(outputs_payload, dict):
+            return [{addr: amount} for addr, amount in outputs_payload.items()]
+
+        formatted: list[Dict[str, Any]] = []
+        for entry in outputs_payload:
+            if len(entry) == 1:
+                formatted.append(entry)
+                continue
+
+            if "address" in entry and "amount" in entry:
+                formatted.append({entry["address"]: entry["amount"]})
+                continue
+
+            if "script" in entry and "amount" in entry:
+                formatted.append({"script": {"hex": entry["script"], "amount": entry["amount"]}})
+                continue
+
+            raise ValueError(
+                "Output entries must collapse to a single key for createrawtransaction"
+            )
+
+        return formatted
 
     @staticmethod
     def _estimate_fee_rate(fee: float, assumed_vbytes: int = 250) -> float:

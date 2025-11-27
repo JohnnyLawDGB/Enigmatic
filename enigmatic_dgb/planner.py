@@ -525,7 +525,7 @@ class SymbolPlanner:
             self._wait_for_block_target(
                 plan.block_target, progress_callback=progress_callback, poll_seconds=poll_seconds
             )
-        outputs_json = {addr: float(amount) for addr, amount in plan.outputs.items()}
+        outputs_json = [{addr: float(amount)} for addr, amount in plan.outputs.items()]
         raw_hex = self.rpc.createrawtransaction(plan.inputs, outputs_json)
         signed = self.rpc.signrawtransactionwithwallet(raw_hex)
         if not signed.get("complete"):
