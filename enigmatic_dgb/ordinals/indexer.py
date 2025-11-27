@@ -122,10 +122,12 @@ class OrdinalIndexer:
 
                 if config.include_taproot_like:
                     from enigmatic_dgb.ordinals import taproot
+                    from enigmatic_dgb.ordinals.inscriptions import ENIG_TAPROOT_MAGIC
 
                     taproot_view = taproot.inspect_output_for_taproot(self.rpc_client, txid, vout_index)
                     if taproot_view.is_taproot_like:
                         taproot_tags = {"taproot_like", "inscription_candidate"}
+                        ordinal_hint = taproot_view.script_pubkey_type or "taproot_like"
                         if taproot_view.script_pubkey_type:
                             taproot_tags.add(f"script_type:{taproot_view.script_pubkey_type}")
                         if taproot_view.control_block_hex:
@@ -133,12 +135,25 @@ class OrdinalIndexer:
                         if taproot_view.leaf_script_hex:
                             taproot_tags.add("taproot_leaf_script_detected")
 
+                            try:
+                                leaf_bytes = bytes.fromhex(taproot_view.leaf_script_hex)
+                            except ValueError:
+                                leaf_bytes = b""
+
+                            if leaf_bytes:
+                                magic_index = leaf_bytes.find(ENIG_TAPROOT_MAGIC)
+                                if magic_index != -1:
+                                    ordinal_hint = "enig_taproot"
+                                    taproot_tags.update(
+                                        {"taproot", "enigmatic_inscription", "taproot_v1"}
+                                    )
+
                         candidate_locations.append(
                             OrdinalLocation(
                                 txid=txid,
                                 vout=vout_index,
                                 height=block_height,
-                                ordinal_hint=taproot_view.script_pubkey_type or "taproot_like",
+                                ordinal_hint=ordinal_hint,
                                 tags=taproot_tags,
                             )
                         )

@@ -122,15 +122,17 @@ class OrdinalInscriptionDecoder:
     def decode_from_tx(self, txid: str) -> List[InscriptionPayload]:
         """Decode inscription-style data from a transaction.
 
-        The current implementation fetches the transaction and delegates to a
-        helper for candidate payload extraction. No decoding heuristics are
-        applied yet.
+        This routine inspects both OP_RETURN-based inscriptions and Enigmatic
+        Taproot dialect inscriptions. It leverages :class:`OrdinalIndexer` to
+        surface candidate outputs and then routes each to the appropriate
+        decoding path, keeping behavior backward-compatible for existing
+        OP_RETURN flows.
         """
 
         tx = self.rpc_client.get_raw_transaction(txid, verbose=True)
         indexer = OrdinalIndexer(self.rpc_client)
         locations = indexer.scan_tx(txid)
-        return _extract_candidate_payloads_from_tx(tx, locations)
+        return _extract_candidate_payloads_from_tx(tx, locations, rpc_client=self.rpc_client)
 
     def decode_from_location(self, location: OrdinalLocation) -> Optional[InscriptionPayload]:
         """Decode a specific output location for inscription-style data.
@@ -374,13 +376,17 @@ class OrdinalInscriptionPlanner:
         return b"".join([b"\x00\x63", _push_data(envelope), b"\x68"])
 
 
-def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List[OrdinalLocation]) -> List[InscriptionPayload]:
+def _extract_candidate_payloads_from_tx(
+    tx_json: Dict[str, Any], locations: List[OrdinalLocation], rpc_client=None
+) -> List[InscriptionPayload]:
     """Extract candidate inscription payloads from a transaction.
 
     This helper performs lightweight decoding for OP_RETURN-based inscriptions
-    and captures raw witness data for taproot-like locations. It is intentionally
-    forgiving and will return as many payloads as it can recover without raising
-    exceptions.
+    and Enigmatic Taproot dialect inscriptions. Taproot decoding is
+    dialect-aware and looks for the ENIG magic within the leaf script before
+    delegating to :func:`decode_enig_taproot_payload`. The helper is
+    intentionally forgiving and will return as many payloads as it can recover
+    without raising exceptions.
     """
 
     logger = logging.getLogger(__name__)
@@ -457,6 +463,78 @@ def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List
                     raw_payload=witness_bytes,
                     decoded_text=witness_bytes.decode("utf-8", errors="replace") if witness_bytes else "",
                     decoded_json=None,
+                )
+            )
+
+        elif location.ordinal_hint == "enig_taproot":
+            if rpc_client is None:
+                logger.debug("RPC client unavailable; cannot inspect taproot view for %s", location)
+                continue
+
+            try:
+                from enigmatic_dgb.ordinals import taproot
+
+                taproot_view = taproot.inspect_output_for_taproot(
+                    rpc_client, location.txid, location.vout
+                )
+            except Exception:  # pragma: no cover - defensive against RPC hiccups
+                logger.debug("Taproot inspection failed for %s", location, exc_info=True)
+                continue
+
+            leaf_hex = taproot_view.leaf_script_hex if taproot_view else None
+            if not leaf_hex:
+                logger.debug("No leaf script present for Enigmatic taproot location %s", location)
+                continue
+
+            try:
+                leaf_bytes = bytes.fromhex(leaf_hex)
+            except ValueError:
+                logger.debug("Leaf script was not valid hex for %s", location)
+                continue
+
+            magic_index = leaf_bytes.find(ENIG_TAPROOT_MAGIC)
+            if magic_index == -1:
+                logger.debug("ENIG magic not found in leaf script for %s", location)
+                continue
+
+            envelope = leaf_bytes[magic_index:]
+            try:
+                version, content_type, payload_bytes = decode_enig_taproot_payload(envelope)
+            except ValueError:
+                logger.debug("Failed to decode Enigmatic taproot payload for %s", location, exc_info=True)
+                continue
+
+            decoded_text: Optional[str] = None
+            if content_type and (
+                content_type.startswith("text/")
+                or content_type == "application/json"
+                or content_type.endswith("+json")
+            ):
+                decoded_text = payload_bytes.decode("utf-8", errors="replace") if payload_bytes else ""
+
+            decoded_json: Optional[Dict[str, Any]] = None
+            if content_type == "application/json" and decoded_text:
+                try:
+                    decoded_json = json.loads(decoded_text)
+                except (json.JSONDecodeError, TypeError):
+                    decoded_json = None
+
+            metadata = InscriptionMetadata(
+                location=location,
+                protocol=ENIG_TAPROOT_PROTOCOL,
+                version=version,
+                content_type=content_type,
+                length=len(payload_bytes),
+                codec="enigmatic/taproot-v1",
+                notes="Enigmatic Taproot inscription candidate",
+            )
+
+            payloads.append(
+                InscriptionPayload(
+                    metadata=metadata,
+                    raw_payload=payload_bytes,
+                    decoded_text=decoded_text,
+                    decoded_json=decoded_json,
                 )
             )
 
