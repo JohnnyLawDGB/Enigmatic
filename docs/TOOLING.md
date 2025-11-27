@@ -180,6 +180,28 @@ searches. Add `--json` to emit machine-readable results when scripting.
 Taproot-aware parsing is experimental and may not recognize all inscription
 formats.
 
+#### Optional local inscription index
+
+Recurring scans can persist decoded inscriptions to a lightweight, local
+SQLite cache to avoid re-scanning the chain. Enable indexing explicitly during
+scans:
+
+```bash
+enigmatic-dgb ord-scan --start-height 1800000 --end-height 1800010 --update-index
+```
+
+The index lives at `~/.enigmatic-dgb/ordinals.sqlite` by default (override with
+`--index-path`). It is non-consensus, can be safely deleted, and can always be
+repopulated by running `ord-scan --update-index` again.
+
+Query cached inscriptions without hitting RPC:
+
+```bash
+enigmatic-dgb ord-index list --limit 20
+enigmatic-dgb ord-index show <txid>
+enigmatic-dgb ord-index by-address <dgb-address>
+```
+
 ### Taproot inscription planning
 
 Use the plan-only Taproot helper to sketch an inscription following the

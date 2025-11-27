@@ -58,6 +58,7 @@ from .ordinals import (
     OrdinalOwnershipView,
     OrdinalScanConfig,
 )
+from .ordinals.index_store import SQLiteOrdinalIndexStore
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
 from .script_plane import ScriptPlane
 from .session import SessionContext
@@ -462,6 +463,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of candidate outputs to return (default: 50)",
     )
     ord_scan_parser.add_argument(
+        "--update-index",
+        action="store_true",
+        help="Persist decoded inscriptions to the local index while scanning",
+    )
+    ord_scan_parser.add_argument(
+        "--index-path",
+        help=(
+            "Optional path to the ordinal index database (default: ~/.enigmatic-dgb/ordinals.sqlite)"
+        ),
+    )
+    ord_scan_parser.add_argument(
         "--include-op-return",
         dest="include_op_return",
         action="store_true",
@@ -515,6 +527,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     ord_scan_parser.set_defaults(rpc_use_https=None)
+
+    ord_index_parser = subparsers.add_parser(
+        "ord-index",
+        help="Interact with the local ordinal inscription index",
+        description=(
+            "Query a cached view of previously decoded inscriptions. No RPC calls are performed; data is read from the local SQLite index."
+        ),
+    )
+    ord_index_parser.add_argument(
+        "--index-path",
+        help=(
+            "Optional path to the ordinal index database (default: ~/.enigmatic-dgb/ordinals.sqlite)"
+        ),
+    )
+    ord_index_subparsers = ord_index_parser.add_subparsers(dest="ord_index_command", required=True)
+
+    ord_index_list = ord_index_subparsers.add_parser(
+        "list",
+        help="List cached inscriptions from the local index",
+    )
+    ord_index_list.add_argument("--limit", type=int, default=20, help="Maximum rows to return (default: 20)")
+    ord_index_list.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
+
+    ord_index_show = ord_index_subparsers.add_parser(
+        "show",
+        help="Show inscriptions for a transaction from the index",
+    )
+    ord_index_show.add_argument("txid", help="Transaction id to display")
+    ord_index_show.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
+
+    ord_index_by_address = ord_index_subparsers.add_parser(
+        "by-address",
+        help="List indexed inscriptions filtered by address",
+    )
+    ord_index_by_address.add_argument("address", help="Output address recorded in the index")
+    ord_index_by_address.add_argument(
+        "--limit", type=int, default=10, help="Maximum rows to return (default: 10)"
+    )
+    ord_index_by_address.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output")
 
     ord_decode_parser = subparsers.add_parser(
         "ord-decode",
@@ -1540,6 +1591,26 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
     )
     indexer = OrdinalIndexer(rpc)
     locations = indexer.scan_range(config)
+    index_updates = 0
+    index_store_path = None
+
+    if getattr(args, "update_index", False) and locations:
+        decoder = OrdinalInscriptionDecoder(rpc)
+        target_locations = {(location.txid, location.vout) for location in locations}
+        txids = {location.txid for location in locations}
+
+        with _get_index_store(args) as index_store:
+            index_store_path = index_store.db_path
+            for txid in txids:
+                verbose_tx = rpc.get_raw_transaction(txid, verbose=True)
+                address_map = _extract_output_addresses(verbose_tx)
+                payloads = decoder.decode_from_tx(txid)
+                for payload in payloads:
+                    loc = payload.metadata.location
+                    if (loc.txid, loc.vout) not in target_locations:
+                        continue
+                    index_store.add_inscription(payload, address=address_map.get(loc.vout))
+                    index_updates += 1
 
     if getattr(args, "as_json", False):
         print(
@@ -1574,6 +1645,29 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
         tags = ",".join(sorted(location.tags)) if location.tags else "-"
         height = location.height if location.height is not None else "-"
         print(f"{height:>6} | {location.txid} | {location.vout:>4} | {tags}")
+
+    if getattr(args, "update_index", False):
+        if index_updates:
+            print(f"Indexed {index_updates} inscription payload(s) into {index_store_path}")
+        else:
+            print("No inscription payloads were decoded for indexing.")
+
+
+def cmd_ord_index(args: argparse.Namespace) -> None:
+    if args.ord_index_command == "list":
+        with _get_index_store(args) as store:
+            payloads = store.all(limit=args.limit)
+        _print_index_payloads(payloads, getattr(args, "as_json", False))
+    elif args.ord_index_command == "show":
+        with _get_index_store(args) as store:
+            payloads = store.get_by_txid(args.txid)
+        _print_index_payloads(payloads, getattr(args, "as_json", False))
+    elif args.ord_index_command == "by-address":
+        with _get_index_store(args) as store:
+            payloads = store.by_address(args.address, limit=args.limit)
+        _print_index_payloads(payloads, getattr(args, "as_json", False))
+    else:  # pragma: no cover - argparse enforces choices
+        raise CLIError(f"Unknown ord-index subcommand: {args.ord_index_command}")
 
 
 def cmd_ord_mine(args: argparse.Namespace) -> None:
@@ -2042,6 +2136,66 @@ def _parse_inscription_message(raw_message: str) -> bytes:
     return raw_message.encode("utf-8")
 
 
+def _extract_output_addresses(verbose_tx: dict) -> dict[int, str | None]:
+    mapping: dict[int, str | None] = {}
+    for vout in verbose_tx.get("vout", []):
+        vout_index = vout.get("n")
+        if vout_index is None:
+            continue
+        script_pub_key = vout.get("scriptPubKey", {})
+        addresses = script_pub_key.get("addresses") or []
+        address = script_pub_key.get("address")
+        mapping[vout_index] = address or (addresses[0] if addresses else None)
+    return mapping
+
+
+def _get_index_store(args: argparse.Namespace) -> SQLiteOrdinalIndexStore:
+    return SQLiteOrdinalIndexStore(args.index_path)
+
+
+def _index_payload_to_dict(payload: InscriptionPayload) -> dict:
+    metadata = payload.metadata
+    return {
+        "height": metadata.location.height,
+        "txid": metadata.location.txid,
+        "vout": metadata.location.vout,
+        "protocol": metadata.protocol,
+        "content_type": metadata.content_type,
+        "length": metadata.length,
+        "decoded_text": payload.decoded_text,
+        "address": metadata.notes,
+    }
+
+
+def _print_index_payloads(payloads: list[InscriptionPayload], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps([_index_payload_to_dict(p) for p in payloads], indent=2))
+        return
+
+    if not payloads:
+        print("No inscriptions found in the local index.")
+        return
+
+    print(
+        " height | txid                                 | vout | protocol              | content type       | address               | preview"
+    )
+    print(
+        "-------+--------------------------------------+------+-" + "-" * 20 + "+--------------------+-----------------------+--------------------"
+    )
+    for payload in payloads:
+        metadata = payload.metadata
+        height = metadata.location.height if metadata.location.height is not None else "-"
+        preview = payload.decoded_text or ""
+        preview = _preview_text(preview.replace("\n", " ").strip() or "-", limit=40)
+        protocol = metadata.protocol or "-"
+        content_type = metadata.content_type or "-"
+        address = metadata.notes or "-"
+        print(
+            f"{height:>6} | {metadata.location.txid} | {metadata.location.vout:>4} | {protocol:>20} | "
+            f"{content_type:>18} | {address:>21} | {preview}"
+        )
+
+
 def _extract_estimated_fee(plan: dict | None) -> float | None:
     metadata = (plan or {}).get("metadata", {}) if isinstance(plan, dict) else {}
     fee = metadata.get("estimated_fee") or (plan or {}).get("funding_amount")
@@ -2085,6 +2239,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_list_utxos(args)
         elif args.command == "ord-scan":
             cmd_ord_scan(args)
+        elif args.command == "ord-index":
+            cmd_ord_index(args)
         elif args.command == "ord-mine":
             cmd_ord_mine(args)
         elif args.command == "ord-decode":

@@ -6,6 +6,7 @@ and subject to change. The Enigmatic Taproot dialect v1 described in
 ``docs/taproot-dialect-v1.md`` is exposed here for discoverability.
 """
 
+from enigmatic_dgb.ordinals.index_store import OrdinalIndexStore, SQLiteOrdinalIndexStore
 from enigmatic_dgb.ordinals.indexer import OrdinalIndexer, OrdinalLocation, OrdinalScanConfig
 from enigmatic_dgb.ordinals.inscriptions import (
     ENIG_TAPROOT_MAGIC,
@@ -25,6 +26,8 @@ __all__ = [
     "OrdinalIndexer",
     "OrdinalLocation",
     "OrdinalScanConfig",
+    "OrdinalIndexStore",
+    "SQLiteOrdinalIndexStore",
     "OrdinalInscriptionDecoder",
     "OrdinalInscriptionPlanner",
     "OrdinalOwnershipView",
