@@ -51,9 +51,11 @@ from .planner import (
     PREVIOUS_CHANGE_SENTINEL,
 )
 from .ordinals import (
+    InscriptionPayload,
     OrdinalIndexer,
     OrdinalInscriptionDecoder,
     OrdinalInscriptionPlanner,
+    OrdinalOwnershipView,
     OrdinalScanConfig,
 )
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
@@ -731,6 +733,85 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     ord_inscribe_parser.set_defaults(rpc_use_https=None)
+
+    ord_mine_parser = subparsers.add_parser(
+        "ord-mine",
+        help="Discover ordinal-style inscriptions belonging to a wallet or address set",
+        description=(
+            "Scan a block range for inscription payloads whose outputs pay to provided addresses "
+            "or a loaded wallet. This is a best-effort, non-consensus view that reuses ord-scan "
+            "heuristics."
+        ),
+    )
+    ord_mine_parser.add_argument("--wallet", help="Wallet name or identifier to pull addresses from")
+    ord_mine_parser.add_argument(
+        "--address",
+        action="append",
+        dest="address",
+        help="Address to scan for inscriptions (repeatable)",
+    )
+    ord_mine_parser.add_argument("--start-height", type=int, help="Starting block height")
+    ord_mine_parser.add_argument("--end-height", type=int, help="Ending block height")
+    ord_mine_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of inscriptions to return (default: 50)",
+    )
+    ord_mine_parser.add_argument(
+        "--include-op-return",
+        dest="include_op_return",
+        action="store_true",
+        default=True,
+        help="Include OP_RETURN outputs when scanning (default)",
+    )
+    ord_mine_parser.add_argument(
+        "--no-include-op-return",
+        dest="include_op_return",
+        action="store_false",
+        help="Skip OP_RETURN outputs while scanning",
+    )
+    ord_mine_parser.add_argument(
+        "--include-taproot-like",
+        dest="include_taproot_like",
+        action="store_true",
+        default=True,
+        help="Inspect taproot-like outputs for inscription candidates (default: on)",
+    )
+    ord_mine_parser.add_argument(
+        "--no-include-taproot-like",
+        dest="include_taproot_like",
+        action="store_false",
+        help="Skip taproot-like detection",
+    )
+    ord_mine_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit discovered inscriptions as JSON",
+    )
+    ord_mine_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_mine_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_mine_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_mine_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_mine_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_mine_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    ord_mine_https_group = ord_mine_parser.add_mutually_exclusive_group()
+    ord_mine_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_mine_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_mine_parser.set_defaults(rpc_use_https=None)
 
     chain_parser = subparsers.add_parser(
         "plan-chain",
@@ -1495,6 +1576,66 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
         print(f"{height:>6} | {location.txid} | {location.vout:>4} | {tags}")
 
 
+def cmd_ord_mine(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+    ownership_view = OrdinalOwnershipView(rpc)
+    config = OrdinalScanConfig(
+        start_height=args.start_height,
+        end_height=args.end_height,
+        limit=args.limit,
+        include_op_return=args.include_op_return,
+        include_taproot_like=args.include_taproot_like,
+    )
+
+    payloads: list[InscriptionPayload]
+    if args.wallet:
+        payloads = ownership_view.find_inscriptions_for_wallet(args.wallet, scan_config=config)
+    elif args.address:
+        payloads = ownership_view.find_inscriptions_for_addresses(args.address, scan_config=config)
+    else:
+        raise CLIError("Provide either --wallet or at least one --address to scan")
+
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                [
+                    {
+                        "height": payload.metadata.location.height,
+                        "txid": payload.metadata.location.txid,
+                        "vout": payload.metadata.location.vout,
+                        "protocol": payload.metadata.protocol,
+                        "content_type": payload.metadata.content_type,
+                        "decoded_text": payload.decoded_text,
+                    }
+                    for payload in payloads
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    if not payloads:
+        print("No inscriptions found for the provided wallet/addresses.")
+        return
+
+    print(" height | txid                                 | vout | protocol              | content type       | preview")
+    print("-------+--------------------------------------+------+-" + "-" * 20 + "+--------------------+--------------------------------")
+    for payload in payloads:
+        metadata = payload.metadata
+        height = metadata.location.height if metadata.location.height is not None else "-"
+        preview = payload.decoded_text or (json.dumps(payload.decoded_json) if payload.decoded_json else "")
+        if preview:
+            preview = preview.replace("\n", " ").strip()
+            if len(preview) > 40:
+                preview = preview[:40] + "…"
+        else:
+            preview = "-"
+        print(
+            f"{height:>6} | {metadata.location.txid} | {metadata.location.vout:>4} | "
+            f"{(metadata.protocol or '-'):>20} | {(metadata.content_type or '-'):>18} | {preview}"
+        )
+
+
 def cmd_ord_decode(args: argparse.Namespace) -> None:
     rpc = _rpc_from_pattern_args(args)
     decoder = OrdinalInscriptionDecoder(rpc)
@@ -1944,6 +2085,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_list_utxos(args)
         elif args.command == "ord-scan":
             cmd_ord_scan(args)
+        elif args.command == "ord-mine":
+            cmd_ord_mine(args)
         elif args.command == "ord-decode":
             cmd_ord_decode(args)
         elif args.command == "ord-plan-op-return":
