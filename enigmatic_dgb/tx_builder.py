@@ -163,9 +163,9 @@ class TransactionBuilder:
         Parameters
         ----------
         outputs_payload
-            Output objects in the shape expected by ``createrawtransaction``. This
-            allows callers to provide raw scripts (e.g., Taproot inscription
-            leaves) alongside standard address payments.
+            Output objects in the shape expected by ``createrawtransaction``. Entries
+            should collapse to single-key dictionaries mapping addresses to amounts
+            or OP_RETURN ``{"data": hex}`` payloads.
         fee
             Absolute fee target in DGB.
         inputs
@@ -180,9 +180,15 @@ class TransactionBuilder:
         formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
 
         if inputs is not None:
+            # IMPORTANT: For DigiByte/Bitcoin RPC, each outputs entry must be an object
+            # with exactly one key, and that key must be a valid address string or
+            # "data" (for OP_RETURN). Do not use "script" or other metadata keys here.
             raw_tx = self.rpc.createrawtransaction(inputs, formatted_outputs)
         else:
             try:
+                # IMPORTANT: For DigiByte/Bitcoin RPC, each outputs entry must be an object
+                # with exactly one key, and that key must be a valid address string or
+                # "data" (for OP_RETURN). Do not use "script" or other metadata keys here.
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 fee_rate = self._estimate_fee_rate(fee)
                 funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
@@ -306,9 +312,10 @@ class TransactionBuilder:
                 formatted.append({entry["address"]: entry["amount"]})
                 continue
 
-            if "script" in entry and "amount" in entry:
-                formatted.append({"script": {"hex": entry["script"], "amount": entry["amount"]}})
-                continue
+            if "script" in entry:
+                raise ValueError(
+                    "Raw script outputs are not supported; provide a destination address instead"
+                )
 
             raise ValueError(
                 "Output entries must collapse to a single key for createrawtransaction"
