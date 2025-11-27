@@ -50,7 +50,12 @@ from .planner import (
     plan_explicit_pattern,
     PREVIOUS_CHANGE_SENTINEL,
 )
-from .ordinals import OrdinalIndexer, OrdinalInscriptionDecoder, OrdinalScanConfig
+from .ordinals import (
+    OrdinalIndexer,
+    OrdinalInscriptionDecoder,
+    OrdinalInscriptionPlanner,
+    OrdinalScanConfig,
+)
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
 from .script_plane import ScriptPlane
 from .session import SessionContext
@@ -545,6 +550,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     ord_decode_parser.set_defaults(rpc_use_https=None)
+
+    ord_plan_op_return_parser = subparsers.add_parser(
+        "ord-plan-op-return",
+        help="Draft a DigiByte OP_RETURN inscription plan (no broadcast)",
+    )
+    ord_plan_op_return_parser.add_argument(
+        "message",
+        help="Message to inscribe (plain text or hex-encoded)",
+    )
+    ord_plan_op_return_parser.add_argument(
+        "--metadata",
+        help="Optional JSON metadata blob attached to the plan",
+    )
+    ord_plan_op_return_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the inscription plan as JSON",
+    )
+    ord_plan_op_return_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_plan_op_return_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_plan_op_return_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_plan_op_return_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_plan_op_return_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_plan_op_return_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    ord_plan_op_return_https_group = ord_plan_op_return_parser.add_mutually_exclusive_group()
+    ord_plan_op_return_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_plan_op_return_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_plan_op_return_parser.set_defaults(rpc_use_https=None)
 
     chain_parser = subparsers.add_parser(
         "plan-chain",
@@ -1366,6 +1412,46 @@ def cmd_ord_decode(args: argparse.Namespace) -> None:
             print(f"  raw_hex: {payload.raw_payload.hex()}")
 
 
+def cmd_ord_plan_op_return(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+
+    metadata_blob = None
+    if args.metadata:
+        try:
+            metadata_blob = json.loads(args.metadata)
+        except json.JSONDecodeError as exc:  # pragma: no cover - argument validation
+            raise CLIError(f"invalid JSON for --metadata: {exc}") from exc
+
+    planner = OrdinalInscriptionPlanner(
+        rpc,
+        tx_builder=TransactionBuilder(rpc),
+    )
+    plan = planner.plan_op_return_inscription(args.message, metadata=metadata_blob)
+
+    if getattr(args, "as_json", False):
+        print(json.dumps(plan, indent=2))
+        return
+
+    metadata = plan.get("metadata", {})
+    print("Ordinal OP_RETURN inscription plan (dry-run)")
+    print(f"  funding_amount: {plan.get('funding_amount', 0):.8f} DGB (placeholder)")
+    print("  proposed outputs:")
+    for index, output in enumerate(plan.get("outputs", []), start=1):
+        description = output.get("description") or output.get("type")
+        print(f"    {index:>2}. {description}")
+        if output.get("type") == "op_return":
+            preview = _preview_text(output.get("data_hex", ""), limit=80)
+            print(f"        data_hex: {preview}")
+    print("  metadata:")
+    for key, value in metadata.items():
+        if key == "notes" and isinstance(value, list):
+            print("    notes:")
+            for note in value:
+                print(f"      - {note}")
+        else:
+            print(f"    {key}: {value}")
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
@@ -1604,6 +1690,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_ord_scan(args)
         elif args.command == "ord-decode":
             cmd_ord_decode(args)
+        elif args.command == "ord-plan-op-return":
+            cmd_ord_plan_op_return(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
