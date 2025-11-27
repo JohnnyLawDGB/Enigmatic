@@ -658,6 +658,80 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ord_plan_taproot_parser.set_defaults(rpc_use_https=None)
 
+    ord_inscribe_parser = subparsers.add_parser(
+        "ord-inscribe",
+        help="Create, sign, and optionally broadcast an inscription (experimental, irreversible)",
+        description=(
+            "Build and sign a real inscription transaction. Broadcasting is opt-in; "
+            "inscriptions are permanent and may bloat the chain. Review fees and "
+            "payloads carefully before proceeding."
+        ),
+    )
+    ord_inscribe_parser.add_argument(
+        "message",
+        help=(
+            "Inscription payload as UTF-8 text or 0x-prefixed hex. Inscriptions are permanent; "
+            "avoid sensitive data."
+        ),
+    )
+    ord_inscribe_parser.add_argument(
+        "--scheme",
+        choices=["op-return", "taproot"],
+        default="taproot",
+        help="Inscription scheme to use (default: taproot)",
+    )
+    ord_inscribe_parser.add_argument(
+        "--content-type",
+        default="text/plain",
+        help="Content type hint stored alongside the payload (default: text/plain)",
+    )
+    ord_inscribe_broadcast = ord_inscribe_parser.add_mutually_exclusive_group()
+    ord_inscribe_broadcast.add_argument(
+        "--broadcast",
+        dest="broadcast",
+        action="store_true",
+        default=True,
+        help="Broadcast the signed inscription transaction (default)",
+    )
+    ord_inscribe_broadcast.add_argument(
+        "--no-broadcast",
+        dest="broadcast",
+        action="store_false",
+        help="Dry-run: print the raw signed transaction without broadcasting",
+    )
+    ord_inscribe_parser.add_argument(
+        "--max-fee-sats",
+        type=int,
+        help="Abort if the estimated fee exceeds this many satoshis",
+    )
+    ord_inscribe_parser.add_argument(
+        "--wallet-name",
+        "--rpc-wallet",
+        dest="rpc_wallet",
+        help="Override RPC wallet name for funding and signing",
+    )
+    ord_inscribe_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_inscribe_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_inscribe_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_inscribe_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_inscribe_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_inscribe_https_group = ord_inscribe_parser.add_mutually_exclusive_group()
+    ord_inscribe_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_inscribe_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_inscribe_parser.set_defaults(rpc_use_https=None)
+
     chain_parser = subparsers.add_parser(
         "plan-chain",
         help="Plan or broadcast a chained symbol using dialect frames",
@@ -1557,6 +1631,55 @@ def cmd_ord_plan_taproot(args: argparse.Namespace) -> None:
         print(f"  taproot_script_hex: {_preview_text(taproot_script_hex, limit=96)}")
 
 
+def cmd_ord_inscribe(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+    builder = TransactionBuilder(rpc)
+    planner = OrdinalInscriptionPlanner(rpc, tx_builder=builder)
+
+    payload = _parse_inscription_message(args.message)
+    metadata = {"content_type": args.content_type}
+
+    if args.scheme == "op-return":
+        plan = planner.plan_op_return_inscription(payload, metadata=metadata)
+        inscription_hex = payload.hex()
+    else:
+        plan = planner.plan_taproot_inscription(payload, metadata=metadata)
+        inscription_hex = plan.get("metadata", {}).get("taproot_script_hex")
+        if not inscription_hex:
+            raise CLIError("Planner did not emit a Taproot inscription script; aborting")
+
+    estimated_fee = _extract_estimated_fee(plan)
+    if estimated_fee is None:
+        raise CLIError("Planner did not provide an estimated fee; refusing to proceed")
+
+    _enforce_fee_cap(estimated_fee, args.max_fee_sats)
+
+    print(
+        "WARNING: inscriptions are permanent, may increase chain bloat, and the payload/fee is your responsibility."
+    )
+
+    try:
+        if args.scheme == "op-return":
+            raw_tx = builder.build_payment_tx({}, float(estimated_fee), op_return_data=[inscription_hex])
+        else:
+            outputs_payload = [{"script": inscription_hex, "amount": 0.0001}]
+            raw_tx = builder.build_custom_tx(outputs_payload, float(estimated_fee))
+    except RuntimeError as exc:
+        raise CLIError(f"Failed to build or sign the inscription transaction: {exc}") from exc
+
+    if not args.broadcast:
+        print("Broadcast disabled (--no-broadcast). Signed transaction (hex):")
+        print(raw_tx)
+        return
+
+    try:
+        txid = rpc.sendrawtransaction(raw_tx)
+    except RPCError as exc:
+        raise CLIError(f"Broadcast failed: {exc}") from exc
+
+    print(f"Broadcasted inscription transaction: {txid}")
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
@@ -1778,6 +1901,23 @@ def _parse_inscription_message(raw_message: str) -> bytes:
     return raw_message.encode("utf-8")
 
 
+def _extract_estimated_fee(plan: dict | None) -> float | None:
+    metadata = (plan or {}).get("metadata", {}) if isinstance(plan, dict) else {}
+    fee = metadata.get("estimated_fee") or (plan or {}).get("funding_amount")
+    return float(fee) if fee is not None else None
+
+
+def _enforce_fee_cap(estimated_fee_dgb: float, fee_cap_sats: int | None) -> None:
+    if fee_cap_sats is None:
+        return
+
+    fee_sats = int(round(float(estimated_fee_dgb) * 1e8))
+    if fee_sats > fee_cap_sats:
+        raise CLIError(
+            f"Estimated fee {fee_sats} sats exceeds configured cap of {fee_cap_sats} sats; aborting"
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1810,6 +1950,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_ord_plan_op_return(args)
         elif args.command == "ord-plan-taproot":
             cmd_ord_plan_taproot(args)
+        elif args.command == "ord-inscribe":
+            cmd_ord_inscribe(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":

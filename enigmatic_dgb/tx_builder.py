@@ -148,6 +148,50 @@ class TransactionBuilder:
                 )
         return signed_hex
 
+    def build_custom_tx(
+        self,
+        outputs_payload: list[Dict[str, Any]] | Dict[str, Any],
+        fee: float,
+        inputs: List[Dict[str, Any]] | None = None,
+    ) -> str:
+        """Build and sign a transaction using preformatted outputs.
+
+        Parameters
+        ----------
+        outputs_payload
+            Output objects in the shape expected by ``createrawtransaction``. This
+            allows callers to provide raw scripts (e.g., Taproot inscription
+            leaves) alongside standard address payments.
+        fee
+            Absolute fee target in DGB.
+        inputs
+            Optional explicit funding inputs. When omitted, the node is asked to
+            fund the transaction via ``fundrawtransaction`` to maintain parity
+            with the wallet's policy.
+        """
+
+        logger.info("Building custom transaction with %d output entries", len(outputs_payload))
+
+        raw_tx: str | None = None
+        if inputs is not None:
+            raw_tx = self.rpc.createrawtransaction(inputs, outputs_payload)
+        else:
+            try:
+                tmp_raw = self.rpc.createrawtransaction([], outputs_payload)
+                fee_rate = self._estimate_fee_rate(fee)
+                funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
+                raw_tx = funded["hex"]
+            except RPCError as exc:
+                raise RuntimeError(
+                    "Wallet could not fund the inscription transaction; add UTXOs or specify inputs"
+                ) from exc
+
+        signed = self.rpc.signrawtransactionwithwallet(raw_tx)
+        if not signed.get("complete"):
+            raise RuntimeError("Node failed to produce a complete signature set for inscription")
+
+        return signed["hex"]
+
     def send_payment_tx(
         self,
         outputs: Dict[str, float],
