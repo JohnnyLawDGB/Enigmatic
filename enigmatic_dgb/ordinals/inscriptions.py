@@ -161,9 +161,25 @@ class OrdinalInscriptionPlanner:
     DEFAULT_FEE_ESTIMATE = 0.001  # Placeholder until tx_builder integration
 
     def __init__(self, rpc_client, tx_builder=None, planner=None) -> None:
+        """Create a planner wired to RPC and transaction-building helpers.
+
+        Parameters
+        ----------
+        rpc_client
+            DigiByte RPC client used for fee lookups and wallet probing.
+        tx_builder
+            Optional transaction-building helper injected by callers so the
+            planner can align its dry-run outputs with real construction
+            routines.
+        planner
+            Optional higher-level planner/automation harness for future
+            integrations.
+        """
+
         self.rpc_client = rpc_client
         # Keep hooks to existing builders so we can slot them in later without
-        # changing the CLI surface area. These are deliberately unused for now.
+        # changing the CLI surface area. These are deliberately unused for now,
+        # but are stored for parity with the transaction planning layer.
         self.tx_builder = tx_builder
         self.planner = planner
 
@@ -216,46 +232,82 @@ class OrdinalInscriptionPlanner:
     def plan_taproot_inscription(
         self, payload: bytes, metadata: dict | None = None
     ) -> dict:
-        """Draft a plan for a taproot-like inscription.
+        """Draft a plan for a Taproot inscription using the Enigmatic dialect.
 
-        The payload is wrapped in a taproot-style witness template but no
-        concrete script path is produced. A future integration should leverage
-        :mod:`enigmatic_dgb.taproot` utilities alongside the transaction planner
-        to derive internal keys, annex data, and signing flows.
+        This remains a dry-run helper: it does not sign or broadcast anything
+        and it currently uses a placeholder internal key. Future revisions
+        should thread a hardened key derivation strategy and satisfaction
+        script into the transaction-building layer.
         """
 
-        payload_hex = payload.hex()
-        estimated_fee = self._estimate_fee_placeholder(len(payload))
+        if not isinstance(payload, (bytes, bytearray)):
+            raise ValueError("payload must be bytes")
 
-        # TODO: replace placeholder output with an actual taproot script tree
-        # and control block derived from enigmatic_dgb.taproot once stable.
+        metadata = metadata or {}
+        content_type = metadata.get("content_type", "application/octet-stream")
+        target_address = metadata.get("target_address")
+        funding_wallet = metadata.get("funding_wallet")
+
+        envelope = encode_enig_taproot_payload(content_type, bytes(payload))
+
+        taproot_leaf_script = self._build_taproot_leaf_script(envelope)
+        taproot_script_hex = taproot_leaf_script.hex()
+
+        internal_key_hex = metadata.get(
+            "internal_key_hex", "00" * 32
+        )  # TODO: thread hardened internal key handling
+
+        estimated_fee = self._estimate_taproot_fee(len(envelope))
+
         proposed_outputs = [
             {
-                "type": "taproot_like",
-                "script_template": {
-                    "witness_stack": [payload_hex],
-                    "control_block": "TODO: control block placeholder",
-                },
-                "description": "Taproot-style commitment stub (not signable)",
+                "type": "taproot_v1",
+                "internal_key_hex": internal_key_hex,
+                "leaf_script_hex": taproot_script_hex,
+                "description": "Taproot inscription leaf (draft, unsatisfied)",
             }
         ]
 
+        # Mirror tx_builder semantics by sketching a change output. Exact
+        # amounts are deferred to the real builder once fee and key-handling
+        # utilities are wired in.
+        change_preview = {
+            "type": "change",
+            "description": "Change output placeholder; amount assigned by builder",
+        }
+
         plan_metadata: dict[str, Any] = {
+            "protocol": ENIG_TAPROOT_PROTOCOL,
+            "content_type": content_type,
             "payload_length": len(payload),
+            "taproot_script_hex": taproot_script_hex,
             "notes": [
-                "Witness and control block are placeholders; planner integration pending",
-                "Funding/change selection will mirror tx_builder semantics in a later revision",
+                "Plan-only: no signing or broadcast performed",
+                "Leaf uses OP_FALSE OP_IF <envelope> OP_ENDIF; satisfaction script pending",
+                "Internal key is a placeholder and should be replaced with a derived key",
             ],
         }
         if estimated_fee is not None:
             plan_metadata["estimated_fee"] = estimated_fee
+        if target_address:
+            plan_metadata["target_address"] = target_address
+        if funding_wallet:
+            plan_metadata["funding_wallet"] = funding_wallet
         if metadata:
             plan_metadata["user_metadata"] = metadata
 
         return {
-            "inscription_type": "taproot_like",
+            "inscription_type": "taproot_inscription",
+            "protocol": ENIG_TAPROOT_PROTOCOL,
+            "content_type": content_type,
             "funding_amount": estimated_fee or 0.0,
-            "outputs": proposed_outputs,
+            "inputs": [
+                {
+                    "source": "wallet",
+                    "assumption": "Single funding input; selection delegated to tx_builder",
+                }
+            ],
+            "outputs": proposed_outputs + [change_preview],
             "metadata": plan_metadata,
         }
 
@@ -284,6 +336,42 @@ class OrdinalInscriptionPlanner:
         # Very rough heuristic: start with a baseline and scale slightly with
         # payload size so operators are nudged to keep inscriptions small.
         return round(self.DEFAULT_FEE_ESTIMATE + (payload_length * 0.0000005), 8)
+
+    def _estimate_taproot_fee(self, envelope_length: int) -> float:
+        """Estimate fee for a simple Taproot inscription transaction.
+
+        The heuristic assumes one funding input, one Taproot output, and one
+        change output. It prioritizes clarity over precision so operators can
+        reason about funding needs before invoking the real transaction
+        builder.
+        """
+
+        # Baseline virtual size approximations (in vbytes):
+        # - Taproot input: ~58 vbytes
+        # - Taproot output: ~43 vbytes
+        # - Change output: ~31 vbytes (varies by address type)
+        # - Overhead: ~10 vbytes
+        # Add a small premium for the inscription envelope length.
+        vbytes = 58 + 43 + 31 + 10 + (envelope_length / 8)
+        # Target a conservative 10 sat/vbyte and convert to DGB assuming 1e8
+        # satoshis per coin.
+        sats = vbytes * 10
+        return round(sats / 1e8, 8)
+
+    @staticmethod
+    def _build_taproot_leaf_script(envelope: bytes) -> bytes:
+        """Construct a single-leaf Taproot script for the inscription envelope."""
+
+        def _push_data(data: bytes) -> bytes:
+            length = len(data)
+            if length <= 75:
+                return bytes([length]) + data
+            if length <= 255:
+                return b"\x4c" + bytes([length]) + data  # OP_PUSHDATA1
+            raise ValueError("envelope too large for simple pushdata encoding")
+
+        # OP_FALSE OP_IF <payload> OP_ENDIF
+        return b"".join([b"\x00\x63", _push_data(envelope), b"\x68"])
 
 
 def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List[OrdinalLocation]) -> List[InscriptionPayload]:
