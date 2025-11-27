@@ -23,6 +23,25 @@ ENIG_TAPROOT_VERSION_V1 = 1
 ENIG_TAPROOT_PROTOCOL = "enigmatic/taproot-v1"
 
 
+def _push_data(data: bytes) -> bytes:
+    """Encode a script push for a single element up to 520 bytes.
+
+    Uses standard Bitcoin-style pushdata opcodes (immediate length,
+    OP_PUSHDATA1, OP_PUSHDATA2). Payloads larger than 520 bytes exceed the
+    standard script element limit and will raise a ``ValueError``; future
+    dialect revisions may support chunking for larger envelopes.
+    """
+
+    n = len(data)
+    if n <= 75:
+        return bytes([n]) + data
+    if 76 <= n <= 255:
+        return b"\x4c" + bytes([n]) + data  # OP_PUSHDATA1
+    if 256 <= n <= 520:
+        return b"\x4d" + n.to_bytes(2, "little") + data  # OP_PUSHDATA2
+    raise ValueError(f"data too large for single script push: {n} bytes (max 520)")
+
+
 def encode_enig_taproot_payload(content_type: str, payload: bytes) -> bytes:
     """Encode a Taproot inscription envelope per ``docs/taproot-dialect-v1.md``.
 
@@ -375,15 +394,13 @@ class OrdinalInscriptionPlanner:
 
     @staticmethod
     def _build_taproot_leaf_script(envelope: bytes) -> bytes:
-        """Construct a single-leaf Taproot script for the inscription envelope."""
+        """Construct a single-leaf Taproot script for the inscription envelope.
 
-        def _push_data(data: bytes) -> bytes:
-            length = len(data)
-            if length <= 75:
-                return bytes([length]) + data
-            if length <= 255:
-                return b"\x4c" + bytes([length]) + data  # OP_PUSHDATA1
-            raise ValueError("envelope too large for simple pushdata encoding")
+        The script is encoded as ``OP_0 OP_IF <envelope> OP_ENDIF``, where the
+        envelope is pushed as a single script element. The envelope must be no
+        larger than 520 bytes due to standard script element limits; if the
+        payload exceeds this, :func:`_push_data` will raise a ``ValueError``.
+        """
 
         # OP_FALSE OP_IF <payload> OP_ENDIF
         return b"".join([b"\x00\x63", _push_data(envelope), b"\x68"])
