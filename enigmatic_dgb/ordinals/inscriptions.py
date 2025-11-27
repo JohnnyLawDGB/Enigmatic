@@ -76,6 +76,145 @@ class OrdinalInscriptionDecoder:
         return None
 
 
+class OrdinalInscriptionPlanner:
+    """Skeleton planner for ordinal-style inscription creation.
+
+    The planner intentionally stops short of building or signing transactions.
+    It accepts the RPC client and optional helpers via dependency injection so
+    that future revisions can integrate tightly with :mod:`planner` and
+    :mod:`tx_builder` without changing the call sites. The returned dictionaries
+    are intended for CLI inspection and carry enough hints for operators to
+    understand what the *eventual* transaction would look like.
+    """
+
+    DEFAULT_FEE_ESTIMATE = 0.001  # Placeholder until tx_builder integration
+
+    def __init__(self, rpc_client, tx_builder=None, planner=None) -> None:
+        self.rpc_client = rpc_client
+        # Keep hooks to existing builders so we can slot them in later without
+        # changing the CLI surface area. These are deliberately unused for now.
+        self.tx_builder = tx_builder
+        self.planner = planner
+
+    def plan_op_return_inscription(
+        self, message: bytes | str, metadata: dict | None = None
+    ) -> dict:
+        """Draft a plan for an OP_RETURN inscription.
+
+        The payload is converted to bytes (hex decoding supported for string
+        inputs) and captured as an OP_RETURN template. Funding amounts and fees
+        are placeholders only—later revisions should request accurate estimates
+        from :class:`~enigmatic_dgb.tx_builder.TransactionBuilder` and wallet
+        policy.
+        """
+
+        payload_bytes = self._coerce_bytes(message)
+        payload_hex = payload_bytes.hex()
+        estimated_fee = self._estimate_fee_placeholder(len(payload_bytes))
+
+        # TODO: integrate TransactionBuilder.build_payment_tx to derive exact
+        # funding requirements, change outputs, and signature scope.
+        proposed_outputs = [
+            {
+                "type": "op_return",
+                "data_hex": payload_hex,
+                "description": "Non-spendable inscription envelope (draft)",
+            }
+        ]
+
+        plan_metadata: dict[str, Any] = {
+            "payload_length": len(payload_bytes),
+            "payload_preview": payload_bytes[:32].hex(),
+            "notes": [
+                "Fee and change are illustrative; tx_builder integration pending",
+                "RPC wallet funding/selection will be delegated in a future patch",
+            ],
+        }
+        if estimated_fee is not None:
+            plan_metadata["estimated_fee"] = estimated_fee
+        if metadata:
+            plan_metadata["user_metadata"] = metadata
+
+        return {
+            "inscription_type": "op_return",
+            "funding_amount": estimated_fee or 0.0,
+            "outputs": proposed_outputs,
+            "metadata": plan_metadata,
+        }
+
+    def plan_taproot_inscription(
+        self, payload: bytes, metadata: dict | None = None
+    ) -> dict:
+        """Draft a plan for a taproot-like inscription.
+
+        The payload is wrapped in a taproot-style witness template but no
+        concrete script path is produced. A future integration should leverage
+        :mod:`enigmatic_dgb.taproot` utilities alongside the transaction planner
+        to derive internal keys, annex data, and signing flows.
+        """
+
+        payload_hex = payload.hex()
+        estimated_fee = self._estimate_fee_placeholder(len(payload))
+
+        # TODO: replace placeholder output with an actual taproot script tree
+        # and control block derived from enigmatic_dgb.taproot once stable.
+        proposed_outputs = [
+            {
+                "type": "taproot_like",
+                "script_template": {
+                    "witness_stack": [payload_hex],
+                    "control_block": "TODO: control block placeholder",
+                },
+                "description": "Taproot-style commitment stub (not signable)",
+            }
+        ]
+
+        plan_metadata: dict[str, Any] = {
+            "payload_length": len(payload),
+            "notes": [
+                "Witness and control block are placeholders; planner integration pending",
+                "Funding/change selection will mirror tx_builder semantics in a later revision",
+            ],
+        }
+        if estimated_fee is not None:
+            plan_metadata["estimated_fee"] = estimated_fee
+        if metadata:
+            plan_metadata["user_metadata"] = metadata
+
+        return {
+            "inscription_type": "taproot_like",
+            "funding_amount": estimated_fee or 0.0,
+            "outputs": proposed_outputs,
+            "metadata": plan_metadata,
+        }
+
+    @staticmethod
+    def _coerce_bytes(message: bytes | str) -> bytes:
+        if isinstance(message, bytes):
+            return message
+        if _is_hex(message):
+            try:
+                return bytes.fromhex(message)
+            except ValueError:
+                # Fall back to UTF-8 encoding when the hex parse fails to keep the
+                # planner permissive for CLI experimentation.
+                return message.encode("utf-8")
+        return message.encode("utf-8")
+
+    def _estimate_fee_placeholder(self, payload_length: int) -> float | None:
+        """Return a rough fee placeholder for inscription planning.
+
+        This is intentionally naive; the goal is to surface the need for funds
+        without constraining the eventual transaction builder. Future revisions
+        should query fee rates and size estimates directly from the node and
+        tx_builder.
+        """
+
+        # Very rough heuristic: start with a baseline and scale slightly with
+        # payload size so operators are nudged to keep inscriptions small.
+        return round(self.DEFAULT_FEE_ESTIMATE + (payload_length * 0.0000005), 8)
+
+
 def _extract_candidate_payloads_from_tx(tx_json: Dict[str, Any], locations: List[OrdinalLocation]) -> List[InscriptionPayload]:
     """Extract candidate inscription payloads from a transaction.
 

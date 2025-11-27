@@ -10,6 +10,7 @@ from enigmatic_dgb.ordinals.inscriptions import (
     InscriptionMetadata,
     InscriptionPayload,
     OrdinalInscriptionDecoder,
+    OrdinalInscriptionPlanner,
 )
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "OrdinalLocation",
     "OrdinalScanConfig",
     "OrdinalInscriptionDecoder",
+    "OrdinalInscriptionPlanner",
     "InscriptionMetadata",
     "InscriptionPayload",
 ]
