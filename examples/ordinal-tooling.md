@@ -82,3 +82,36 @@ This basic workflow provides a foundation for deeper analysis—such as correlat
 inscriptions with Enigmatic channels or mapping payloads into state-plane
 transitions. Future releases may add filtering by address, richer protocol
 identification, and Taproot-aware parsing once signing support matures.
+
+## Taproot dialect v1 workflow (experimental)
+
+Enigmatic Taproot Dialect v1 inscriptions bundle an `ENIG`-prefixed envelope inside a
+Taproot leaf script. The CLI provides helpers for planning, scanning, and decoding
+these experimental inscriptions.
+
+1. Draft an inscription plan:
+
+   ```bash
+   enigmatic-dgb ord-plan-taproot "hello-enig-taproot" --content-type text/plain
+   ```
+
+   The planner emits a Taproot leaf script hex string you can embed in a
+   transaction. Final signing and broadcast still require wallet-level tooling
+   outside of Enigmatic.
+
+2. After the transaction is built and broadcast, locate the inscription:
+
+   ```bash
+   enigmatic-dgb ord-scan --include-taproot-like --start -10 --end 0
+   ```
+
+   The scanner reports outputs tagged with `enig_taproot` when it detects the
+   envelope in a Taproot leaf script.
+
+3. Decode the payload from the transaction:
+
+   ```bash
+   enigmatic-dgb ord-decode <txid>
+   ```
+
+   Decoding will reveal the content type and the UTF-8 text payload when present.
