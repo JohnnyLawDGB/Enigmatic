@@ -155,6 +155,22 @@ Decoded walkthroughs in `examples/example-decoding-flow.md` mirror the watcher
 output and illustrate how block spacing and change-linking recover multi-frame
 symbols.
 
+### Ordinal inscription exploration
+
+Probe the chain for inscription-style outputs or inspect a specific
+transaction using the shared RPC configuration:
+
+```bash
+# Scan a slice of the chain for candidates
+enigmatic-dgb ord-scan --limit 10
+
+# Decode inscription-like payloads from a transaction (all vouts)
+enigmatic-dgb ord-decode <txid>
+```
+
+Taproot-aware parsing is experimental and may not recognize all inscription
+formats.
+
 ## 8. Integrating wallets & RPC setups
 
 - For **mainnet/testnet switching**, override `--rpc-port` and `--rpc-wallet`

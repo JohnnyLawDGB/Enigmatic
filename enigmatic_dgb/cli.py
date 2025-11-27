@@ -50,6 +50,7 @@ from .planner import (
     plan_explicit_pattern,
     PREVIOUS_CHANGE_SENTINEL,
 )
+from .ordinals import OrdinalIndexer, OrdinalInscriptionDecoder, OrdinalScanConfig
 from .rpc_client import ConfigurationError, DigiByteRPC, RPCConfig, RPCError
 from .script_plane import ScriptPlane
 from .session import SessionContext
@@ -435,6 +436,115 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     list_utxos_parser.set_defaults(rpc_use_https=None)
+
+    ord_scan_parser = subparsers.add_parser(
+        "ord-scan", help="Scan a block range for ordinal inscription candidates"
+    )
+    ord_scan_parser.add_argument("--start-height", type=int, help="Starting block height")
+    ord_scan_parser.add_argument("--end-height", type=int, help="Ending block height")
+    ord_scan_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of candidates or blocks to scan (default: 50)",
+    )
+    ord_scan_parser.add_argument(
+        "--include-op-return",
+        dest="include_op_return",
+        action="store_true",
+        default=True,
+        help="Include OP_RETURN outputs when scanning (default)",
+    )
+    ord_scan_parser.add_argument(
+        "--no-include-op-return",
+        dest="include_op_return",
+        action="store_false",
+        help="Skip OP_RETURN outputs while scanning",
+    )
+    ord_scan_parser.add_argument(
+        "--include-taproot-like",
+        dest="include_taproot_like",
+        action="store_true",
+        default=False,
+        help="Inspect taproot-like outputs for inscription candidates (experimental)",
+    )
+    ord_scan_parser.add_argument(
+        "--no-include-taproot-like",
+        dest="include_taproot_like",
+        action="store_false",
+        help="Skip taproot-like detection (default)",
+    )
+    ord_scan_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the scan results as JSON",
+    )
+    ord_scan_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_scan_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_scan_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_scan_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_scan_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_scan_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    ord_scan_https_group = ord_scan_parser.add_mutually_exclusive_group()
+    ord_scan_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_scan_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_scan_parser.set_defaults(rpc_use_https=None)
+
+    ord_decode_parser = subparsers.add_parser(
+        "ord-decode", help="Decode inscription-style payloads from a transaction"
+    )
+    ord_decode_parser.add_argument("txid", help="Transaction id to inspect")
+    ord_decode_parser.add_argument(
+        "--vout",
+        type=int,
+        help="Optional vout index to filter to a specific output",
+    )
+    ord_decode_parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Include the raw payload hex in the output",
+    )
+    ord_decode_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit decoded payloads as JSON",
+    )
+    ord_decode_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_decode_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_decode_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_decode_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_decode_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_decode_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    ord_decode_https_group = ord_decode_parser.add_mutually_exclusive_group()
+    ord_decode_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_decode_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_decode_parser.set_defaults(rpc_use_https=None)
 
     chain_parser = subparsers.add_parser(
         "plan-chain",
@@ -1152,6 +1262,110 @@ def cmd_list_utxos(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_ord_scan(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+    config = OrdinalScanConfig(
+        start_height=args.start_height,
+        end_height=args.end_height,
+        limit=args.limit,
+        include_op_return=args.include_op_return,
+        include_taproot_like=args.include_taproot_like,
+    )
+    indexer = OrdinalIndexer(rpc)
+    locations = indexer.scan_range(config)
+
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                [
+                    {
+                        "txid": location.txid,
+                        "vout": location.vout,
+                        "height": location.height,
+                        "ordinal_hint": location.ordinal_hint,
+                        "tags": sorted(location.tags),
+                    }
+                    for location in locations
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    if not locations:
+        print("No inscription candidates found.")
+        return
+
+    start_desc = config.start_height if config.start_height is not None else 0
+    end_desc = config.end_height if config.end_height is not None else "best"
+    print(
+        f"Found {len(locations)} candidate output(s) while scanning heights {start_desc} → {end_desc}"
+    )
+    print(" height | txid                                 | vout | tags")
+    print("-------+--------------------------------------+------+-" + "-" * 20)
+    for location in locations:
+        tags = ",".join(sorted(location.tags)) if location.tags else "-"
+        height = location.height if location.height is not None else "-"
+        print(f"{height:>6} | {location.txid} | {location.vout:>4} | {tags}")
+
+
+def cmd_ord_decode(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+    decoder = OrdinalInscriptionDecoder(rpc)
+    payloads = decoder.decode_from_tx(args.txid)
+    if args.vout is not None:
+        payloads = [
+            payload
+            for payload in payloads
+            if payload.metadata.location.vout == args.vout
+        ]
+
+    if not payloads:
+        print("No inscription-style payloads found.")
+        return
+
+    if getattr(args, "as_json", False):
+        output = []
+        for payload in payloads:
+            metadata = payload.metadata
+            entry = {
+                "txid": metadata.location.txid,
+                "vout": metadata.location.vout,
+                "height": metadata.location.height,
+                "protocol": metadata.protocol,
+                "content_type": metadata.content_type,
+                "length": metadata.length,
+                "codec": metadata.codec,
+                "notes": metadata.notes,
+                "decoded_text": payload.decoded_text,
+                "decoded_json": payload.decoded_json,
+            }
+            if args.raw:
+                entry["raw_hex"] = payload.raw_payload.hex()
+            output.append(entry)
+        print(json.dumps(output, indent=2))
+        return
+
+    for payload in payloads:
+        metadata = payload.metadata
+        location = metadata.location
+        print(
+            f"txid {location.txid} vout {location.vout} | protocol {metadata.protocol} | length {metadata.length}"
+        )
+        content_type = metadata.content_type or "unknown"
+        codec = metadata.codec or "-"
+        print(f"  content_type: {content_type}; codec: {codec}")
+        if metadata.notes:
+            print(f"  notes: {metadata.notes}")
+        if payload.decoded_text:
+            preview = _preview_text(payload.decoded_text)
+            print(f"  decoded_text: {preview}")
+        if payload.decoded_json is not None:
+            print(f"  decoded_json: {json.dumps(payload.decoded_json, separators=COMPACT_JSON_SEPARATORS)}")
+        if args.raw:
+            print(f"  raw_hex: {payload.raw_payload.hex()}")
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
@@ -1352,6 +1566,12 @@ def _format_script_plane(script_plane: ScriptPlane | None) -> str:
     return descriptor
 
 
+def _preview_text(value: str, limit: int = 120) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "…"
+
+
 def _stdout_progress(message: str) -> None:
     print(message)
 
@@ -1380,6 +1600,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_binary_decode(args)
         elif args.command == "list-utxos":
             cmd_list_utxos(args)
+        elif args.command == "ord-scan":
+            cmd_ord_scan(args)
+        elif args.command == "ord-decode":
+            cmd_ord_decode(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
