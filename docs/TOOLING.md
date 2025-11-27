@@ -210,7 +210,9 @@ Use the plan-only Taproot helper to sketch an inscription following the
 Enigmatic Taproot Dialect v1. It connects to the DigiByte node using the same
 RPC flags as other ordinal commands and **does not sign or broadcast** the
 transaction. See [`taproot-dialect-v1.md`](taproot-dialect-v1.md) for the
-envelope layout.
+envelope layout. See also
+[`taproot-wallets-cli.md`](taproot-wallets-cli.md) for setting up a Taproot
+descriptor wallet with `digibyte-cli`.
 
 ```bash
 # Plan a text/plain inscription
