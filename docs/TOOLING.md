@@ -59,6 +59,7 @@ wallet before broadcasting so the transaction builder can sign each frame.
 | `ord-decode` | Decode inscription-style payloads from a transaction (experimental). |
 | `ord-plan-op-return` | Draft an OP_RETURN inscription envelope without broadcasting (experimental). |
 | `ord-plan-taproot` | Draft an Enigmatic Taproot Dialect v1 inscription leaf and funding sketch (experimental). |
+| `ord-inscribe` | Build, sign, and optionally broadcast an inscription transaction (experimental, irreversible). |
 | `dtsp-*`, `binary-utxo-*` | Encode/decode helpers for specific substitution mappings. |
 
 Common planner flags:
@@ -194,6 +195,24 @@ enigmatic-dgb ord-plan-taproot "hello taproot"
 # Plan a binary payload with a custom content type and JSON output
 enigmatic-dgb ord-plan-taproot 0x68656c6c6f --content-type application/octet-stream --json
 ```
+
+### Creating inscriptions
+
+Move from planning to on-chain inscriptions with explicit safety controls. Fees
+are your responsibility; inscriptions are permanent and can bloat the chain.
+
+```bash
+# Dry-run an OP_RETURN inscription and inspect the signed hex without broadcasting
+enigmatic-dgb ord-inscribe "hello chain" --scheme op-return --no-broadcast --max-fee-sats 250000
+
+# Taproot-style inscription with content-type hint and fee cap
+enigmatic-dgb ord-inscribe 0x68656c6c6f --content-type text/plain --scheme taproot --max-fee-sats 400000
+```
+
+Use `--no-broadcast` to validate funding and signatures without relaying. Add
+`--max-fee-sats` to abort when the estimated fee exceeds your budget. Broadcasting
+is enabled by default; the CLI prints a warning before submission so you can
+double-check the payload and fee.
 
 ## 8. Integrating wallets & RPC setups
 
