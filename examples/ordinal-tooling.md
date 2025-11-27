@@ -12,24 +12,23 @@ conventionally encoded data for analysis within the Enigmatic state-plane model.
 candidates. Today that primarily means OP_RETURN outputs and Taproot-like witness
 patterns. You can run the scanner against a locally running DigiByte node that is
 exposed over JSON-RPC. The CLI reads standard RPC environment variables
-(`DGB_RPCUSER`, `DGB_RPCPASSWORD`, `DGB_RPCPORT`, etc.) so you can reuse existing
-wallet settings.
+(`DGB_RPC_USER`, `DGB_RPC_PASSWORD`, `DGB_RPC_PORT`, etc.) so you can reuse
+existing wallet settings.
 
-Example: scan the most recent 5 blocks for OP_RETURN inscriptions only.
+Example: scan a short block window for OP_RETURN inscriptions only.
 
 ```bash
-export DGB_RPCUSER="rpcuser"
-export DGB_RPCPASSWORD="rpcpass"
-export DGB_RPCPORT="14022"  # adjust for your node
+export DGB_RPC_USER="rpcuser"
+export DGB_RPC_PASSWORD="rpcpass"
+export DGB_RPC_PORT="14022"  # adjust for your node
 
-enigmatic-dgb ord-scan --start -5 --end 0 --limit 50 --no-taproot
+enigmatic-dgb ord-scan --start-height 1800000 --end-height 1800010 --limit 50 --no-include-taproot-like
 ```
 
 Notes:
 
-- Passing a negative `--start` offset counts back from the current best height.
 - Use `--limit` to cap how many candidate outputs are returned.
-- `--no-op-return` or `--no-taproot` can disable individual detection modes if
+- `--no-include-op-return` or `--no-include-taproot-like` can disable individual detection modes if
   you only want one style of signal.
 - The output lists `txid`, `vout`, and `ordinal_hint` fields, plus tags like
   `op_return` or `taproot_like` so you can decide what to decode next.
@@ -42,7 +41,7 @@ outputs using the same heuristics as the scanner, and attempt to render useful
 text or JSON when possible.
 
 ```bash
-enigmatic-dgb ord-decode --txid <txid>
+enigmatic-dgb ord-decode <txid> --json
 ```
 
 Typical output includes:
@@ -102,7 +101,7 @@ these experimental inscriptions.
 2. After the transaction is built and broadcast, locate the inscription:
 
    ```bash
-   enigmatic-dgb ord-scan --include-taproot-like --start -10 --end 0
+   enigmatic-dgb ord-scan --include-taproot-like --start-height 1800000 --end-height 1800010
    ```
 
    The scanner reports outputs tagged with `enig_taproot` when it detects the
@@ -111,7 +110,7 @@ these experimental inscriptions.
 3. Decode the payload from the transaction:
 
    ```bash
-   enigmatic-dgb ord-decode <txid>
+   enigmatic-dgb ord-decode <txid> --json
    ```
 
    Decoding will reveal the content type and the UTF-8 text payload when present.

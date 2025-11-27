@@ -35,11 +35,11 @@
 ### 1.7 Ordinal-style inscription tooling (`enigmatic_dgb/ordinals/`)
 * Optional, experimental layer for observing and decoding inscription-like data (OP_RETURN payloads and Taproot-style witness segments).
 * Reuses the shared `rpc_client` utilities to walk blocks/transactions without altering consensus rules.
-* Sits alongside `watcher.py` (observation) and `decoder.py` (decoding) as a research-focused path for inscription discovery.
+* `indexer.py` surfaces candidate locations, `inscriptions.py` decodes OP_RETURN and Taproot dialect payloads, and `taproot.py` inspects witness/state for heuristic matches. Public re-exports live in `enigmatic_dgb.ordinals` and are also exposed at the package root for discoverability.
 ```
 [rpc_client]
     |-- watcher.py --> decoder.py (address-focused flows)
-    \-- ordinals/indexer.py --> ordinals/decoder.py (inscription-like flows)
+    \-- ordinals/indexer.py --> ordinals/inscriptions.py (inscription-like flows)
 ```
 
 ### 1.8 CLI (`enigmatic_dgb.cli`)

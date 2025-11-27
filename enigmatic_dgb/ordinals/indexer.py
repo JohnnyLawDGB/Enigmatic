@@ -63,8 +63,8 @@ class OrdinalIndexer:
         blocks. This scaffolding is intentionally light and is expected to be
         replaced with pagination and cache-aware behavior.
 
-        TODO: Expand to support reverse iteration and streaming from an
-        external index when available.
+        TODO: Expand to support reverse iteration, negative offsets from the tip,
+        and streaming from an external inscription index when available.
         """
 
         best_height = self.rpc_client.get_best_height()
@@ -86,7 +86,8 @@ class OrdinalIndexer:
         outputs and Taproot-like witness payloads before constructing
         :class:`OrdinalLocation` results.
 
-        TODO: Implement OP_RETURN scraping and Taproot-style witness scanning.
+        TODO: Implement OP_RETURN payload scraping and full Taproot-style witness
+        scanning with BIP341 verification once the heuristics harden.
         """
 
         candidate_locations: List[OrdinalLocation] = []

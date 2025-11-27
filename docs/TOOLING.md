@@ -55,6 +55,10 @@ wallet before broadcasting so the transaction builder can sign each frame.
 | `plan-pattern` | Plan/broadcast an explicit list of amounts (value-plane only). |
 | `send-sequence` / `plan-sequence` | Chained explicit sequences with optional OP_RETURN hints. |
 | `watch` | Observe an address and stream decoded packets. |
+| `ord-scan` | Scan a block range for OP_RETURN and Taproot-style inscription candidates (experimental). |
+| `ord-decode` | Decode inscription-style payloads from a transaction (experimental). |
+| `ord-plan-op-return` | Draft an OP_RETURN inscription envelope without broadcasting (experimental). |
+| `ord-plan-taproot` | Draft an Enigmatic Taproot Dialect v1 inscription leaf and funding sketch (experimental). |
 | `dtsp-*`, `binary-utxo-*` | Encode/decode helpers for specific substitution mappings. |
 
 Common planner flags:
@@ -158,16 +162,20 @@ symbols.
 ### Ordinal inscription exploration
 
 Probe the chain for inscription-style outputs or inspect a specific
-transaction using the shared RPC configuration:
+transaction using the shared RPC configuration. These helpers are
+conventional, non-consensus conveniences and may evolve as the Enigmatic
+Taproot dialect matures.
 
 ```bash
 # Scan a slice of the chain for candidates
-enigmatic-dgb ord-scan --limit 10
+enigmatic-dgb ord-scan --start-height 1800000 --end-height 1800010 --limit 10
 
 # Decode inscription-like payloads from a transaction (all vouts)
-enigmatic-dgb ord-decode <txid>
+enigmatic-dgb ord-decode <txid> --json
 ```
 
+Pass `--no-include-op-return` or `--no-include-taproot-like` to narrow
+searches. Add `--json` to emit machine-readable results when scripting.
 Taproot-aware parsing is experimental and may not recognize all inscription
 formats.
 
@@ -176,7 +184,8 @@ formats.
 Use the plan-only Taproot helper to sketch an inscription following the
 Enigmatic Taproot Dialect v1. It connects to the DigiByte node using the same
 RPC flags as other ordinal commands and **does not sign or broadcast** the
-transaction.
+transaction. See [`taproot-dialect-v1.md`](taproot-dialect-v1.md) for the
+envelope layout.
 
 ```bash
 # Plan a text/plain inscription

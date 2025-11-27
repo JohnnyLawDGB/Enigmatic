@@ -443,7 +443,13 @@ def build_parser() -> argparse.ArgumentParser:
     list_utxos_parser.set_defaults(rpc_use_https=None)
 
     ord_scan_parser = subparsers.add_parser(
-        "ord-scan", help="Scan a block range for ordinal inscription candidates"
+        "ord-scan",
+        help="Scan a block range for ordinal-style inscription candidates (experimental)",
+        description=(
+            "Inspect DigiByte blocks for conventional inscription carriers. "
+            "This is a non-consensus, research-only surface for OP_RETURN and "
+            "Taproot-style payload discovery."
+        ),
     )
     ord_scan_parser.add_argument("--start-height", type=int, help="Starting block height")
     ord_scan_parser.add_argument("--end-height", type=int, help="Ending block height")
@@ -451,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=50,
-        help="Maximum number of candidates or blocks to scan (default: 50)",
+        help="Maximum number of candidate outputs to return (default: 50)",
     )
     ord_scan_parser.add_argument(
         "--include-op-return",
@@ -470,14 +476,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-taproot-like",
         dest="include_taproot_like",
         action="store_true",
-        default=False,
-        help="Inspect taproot-like outputs for inscription candidates (experimental)",
+        default=True,
+        help="Inspect taproot-like outputs for inscription candidates (default: on)",
     )
     ord_scan_parser.add_argument(
         "--no-include-taproot-like",
         dest="include_taproot_like",
         action="store_false",
-        help="Skip taproot-like detection (default)",
+        help="Skip taproot-like detection",
     )
     ord_scan_parser.add_argument(
         "--json",
@@ -509,7 +515,13 @@ def build_parser() -> argparse.ArgumentParser:
     ord_scan_parser.set_defaults(rpc_use_https=None)
 
     ord_decode_parser = subparsers.add_parser(
-        "ord-decode", help="Decode inscription-style payloads from a transaction"
+        "ord-decode",
+        help="Decode inscription-style payloads from a transaction (experimental)",
+        description=(
+            "Render OP_RETURN and Enigmatic Taproot dialect payloads without "
+            "claiming ordinal consensus. This helper is advisory and may evolve "
+            "as the dialect matures."
+        ),
     )
     ord_decode_parser.add_argument("txid", help="Transaction id to inspect")
     ord_decode_parser.add_argument(
@@ -554,6 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
     ord_plan_op_return_parser = subparsers.add_parser(
         "ord-plan-op-return",
         help="Draft a DigiByte OP_RETURN inscription plan (no broadcast)",
+        description=(
+            "Plan-only helper for OP_RETURN inscriptions. This does not sign or "
+            "broadcast a transaction and should be treated as a convention-only "
+            "preview."
+        ),
     )
     ord_plan_op_return_parser.add_argument(
         "message",
@@ -595,6 +612,11 @@ def build_parser() -> argparse.ArgumentParser:
     ord_plan_taproot_parser = subparsers.add_parser(
         "ord-plan-taproot",
         help="Draft a DigiByte Taproot inscription plan (no broadcast)",
+        description=(
+            "Plan-only helper for the Enigmatic Taproot Dialect v1. Output is an "
+            "unsatisfied leaf script and funding sketch; it is experimental and "
+            "may change in future dialect versions."
+        ),
     )
     ord_plan_taproot_parser.add_argument(
         "message",
