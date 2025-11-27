@@ -592,6 +592,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ord_plan_op_return_parser.set_defaults(rpc_use_https=None)
 
+    ord_plan_taproot_parser = subparsers.add_parser(
+        "ord-plan-taproot",
+        help="Draft a DigiByte Taproot inscription plan (no broadcast)",
+    )
+    ord_plan_taproot_parser.add_argument(
+        "message",
+        help="Message to inscribe (plain text or 0x-prefixed hex)",
+    )
+    ord_plan_taproot_parser.add_argument(
+        "--content-type",
+        default="text/plain",
+        help="MIME content type for the Taproot envelope (default: text/plain)",
+    )
+    ord_plan_taproot_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the inscription plan as JSON",
+    )
+    ord_plan_taproot_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_plan_taproot_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_plan_taproot_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_plan_taproot_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_plan_taproot_parser.add_argument(
+        "--rpc-password", help="Override RPC password"
+    )
+    ord_plan_taproot_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
+    ord_plan_taproot_https_group = ord_plan_taproot_parser.add_mutually_exclusive_group()
+    ord_plan_taproot_https_group.add_argument(
+        "--rpc-use-https",
+        dest="rpc_use_https",
+        action="store_const",
+        const=True,
+        help="Force HTTPS when contacting the node",
+    )
+    ord_plan_taproot_https_group.add_argument(
+        "--rpc-use-http",
+        dest="rpc_use_https",
+        action="store_const",
+        const=False,
+        help="Force HTTP when contacting the node",
+    )
+    ord_plan_taproot_parser.set_defaults(rpc_use_https=None)
+
     chain_parser = subparsers.add_parser(
         "plan-chain",
         help="Plan or broadcast a chained symbol using dialect frames",
@@ -1452,6 +1496,45 @@ def cmd_ord_plan_op_return(args: argparse.Namespace) -> None:
             print(f"    {key}: {value}")
 
 
+def cmd_ord_plan_taproot(args: argparse.Namespace) -> None:
+    rpc = _rpc_from_pattern_args(args)
+
+    planner = OrdinalInscriptionPlanner(
+        rpc,
+        tx_builder=TransactionBuilder(rpc),
+    )
+
+    payload = _parse_inscription_message(args.message)
+    plan = planner.plan_taproot_inscription(
+        payload,
+        metadata={"content_type": args.content_type},
+    )
+
+    if getattr(args, "as_json", False):
+        print(json.dumps(plan, indent=2))
+        return
+
+    metadata = plan.get("metadata", {})
+    protocol = plan.get("protocol") or metadata.get("protocol") or "-"
+    content_type = plan.get("content_type") or metadata.get("content_type") or "-"
+    payload_length = metadata.get("payload_length")
+    estimated_fee = metadata.get("estimated_fee")
+    taproot_script_hex = metadata.get("taproot_script_hex", "")
+
+    print("Ordinal Taproot inscription plan (dry-run)")
+    print(f"  protocol: {protocol}")
+    print(f"  content_type: {content_type}")
+    if payload_length is not None:
+        print(f"  payload_length: {payload_length} bytes")
+    if estimated_fee is not None:
+        print(f"  estimated_fee: {float(estimated_fee):.8f} DGB")
+    inputs = plan.get("inputs", [])
+    outputs = plan.get("outputs", [])
+    print(f"  inputs: {len(inputs)} | outputs: {len(outputs)}")
+    if taproot_script_hex:
+        print(f"  taproot_script_hex: {_preview_text(taproot_script_hex, limit=96)}")
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(args, dialect.automation.endpoint, dialect.automation.wallet)
@@ -1662,6 +1745,17 @@ def _stdout_progress(message: str) -> None:
     print(message)
 
 
+def _parse_inscription_message(raw_message: str) -> bytes:
+    """Interpret the inscription message as UTF-8 or hex."""
+
+    if raw_message.lower().startswith("0x"):
+        try:
+            return bytes.fromhex(raw_message[2:])
+        except ValueError as exc:  # pragma: no cover - argument validation
+            raise CLIError("invalid hex string for inscription payload") from exc
+    return raw_message.encode("utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1692,6 +1786,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_ord_decode(args)
         elif args.command == "ord-plan-op-return":
             cmd_ord_plan_op_return(args)
+        elif args.command == "ord-plan-taproot":
+            cmd_ord_plan_taproot(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
