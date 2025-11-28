@@ -806,6 +806,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Abort if the estimated fee exceeds this many satoshis (default: %(default)s)",
     )
     ord_inscribe_parser.add_argument(
+        "--fee-rate-sats-per-vbyte",
+        type=float,
+        dest="fee_rate_sats_per_vbyte",
+        help=(
+            "Override the feeRate passed to wallet funding (sats/vbyte); "
+            "defaults to a conservative relay-safe value"
+        ),
+    )
+    ord_inscribe_parser.add_argument(
         "--wallet-name",
         "--rpc-wallet",
         dest="rpc_wallet",
@@ -1980,6 +1989,10 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     payload = _parse_inscription_message(args.message)
     metadata = {"content_type": args.content_type}
 
+    fee_rate_override = None
+    if args.fee_rate_sats_per_vbyte is not None:
+        fee_rate_override = (args.fee_rate_sats_per_vbyte * 1000) / 1e8
+
     logger.debug(
         "ord-inscribe scheme=%s content_type=%s broadcast=%s max_fee_sats=%s",
         args.scheme,
@@ -2015,7 +2028,10 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     try:
         if args.scheme == "op-return":
             raw_tx = builder.build_payment_tx(
-                {}, float(estimated_fee), op_return_data=[inscription_hex]
+                {},
+                float(estimated_fee),
+                op_return_data=[inscription_hex],
+                fee_rate_override=fee_rate_override,
             )
         else:
             try:
@@ -2024,7 +2040,11 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
                 inscription_address = rpc.getnewaddress()
 
             outputs_payload = [{inscription_address: 0.0001}]
-            raw_tx = builder.build_custom_tx(outputs_payload, float(estimated_fee))
+            raw_tx = builder.build_custom_tx(
+                outputs_payload,
+                float(estimated_fee),
+                fee_rate_override=fee_rate_override,
+            )
     except RuntimeError as exc:
         raise CLIError(
             f"Failed to build or sign the inscription transaction: {exc}"
