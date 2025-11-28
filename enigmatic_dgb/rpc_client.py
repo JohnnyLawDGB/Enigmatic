@@ -34,6 +34,50 @@ class RPCError(RuntimeError):
         self.message = message
 
 
+def format_rpc_hint(error_obj: dict[str, Any] | RPCError | None) -> str | None:
+    """Return a human-friendly hint for common DigiByte JSON-RPC errors.
+
+    This helper is intentionally conservative: it inspects the error code and
+    message for well-known failure modes we see during inscription flows and
+    emits a concise remediation hint when possible. Callers should still log
+    the structured RPC error body; this function complements those diagnostics
+    with actionable guidance for CLI users.
+    """
+
+    if error_obj is None:
+        return None
+
+    code = None
+    message = ""
+    if isinstance(error_obj, RPCError):
+        code = error_obj.code
+        message = error_obj.message
+    elif isinstance(error_obj, dict):
+        code = error_obj.get("code")
+        message = str(error_obj.get("message", ""))
+
+    if code == -26 and "min relay fee not met" in message:
+        return (
+            "The node rejected the transaction because the fee is below its minrelaytxfee policy. "
+            "Try one of:\n"
+            "  - Increase --max-fee-sats for this inscription\n"
+            "  - Increase your wallet's paytxfee (settxfee) for the lab wallet\n"
+            "  - Lower minrelaytxfee in digibyte.conf for a local test node"
+        )
+    if code == -8 and "key-value pair must contain exactly one key" in message:
+        return (
+            "createrawtransaction outputs are malformed. Each outputs entry must be an object with "
+            "exactly one key, e.g. {\"address\": amount} or {\"data\": \"hex\"}."
+        )
+    if code == -5 and "Invalid DigiByte address" in message:
+        return (
+            "One of the outputs passed to createrawtransaction is not a valid address. If you see "
+            "'script' in the error, you probably used {\"script\": ...} as a key, which DigiByte Core does "
+            "not accept in this context."
+        )
+    return None
+
+
 class ConfigurationError(RuntimeError):
     """Raised when configuration is invalid."""
 
