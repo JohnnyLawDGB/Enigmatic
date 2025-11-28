@@ -71,6 +71,8 @@ class UTXOManager:
 class TransactionBuilder:
     """Build and send DigiByte transactions without encoding knowledge."""
 
+    DEFAULT_RELAY_SAFE_FEE_RATE = 0.0002
+
     def __init__(self, rpc: DigiByteRPC) -> None:
         self.rpc = rpc
         self.utxo_manager = UTXOManager(rpc)
@@ -82,6 +84,7 @@ class TransactionBuilder:
         op_return_data: list[str] | None = None,
         inputs: List[Dict[str, Any]] | None = None,
         script_plane: ScriptPlane | None = None,
+        fee_rate_override: float | None = None,
     ) -> str:
         """Create a signed raw transaction paying outputs with the provided fee."""
 
@@ -111,8 +114,10 @@ class TransactionBuilder:
             try:
                 logger.debug("Attempting automatic funding via fundrawtransaction")
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
-                fee_rate = self._estimate_fee_rate(fee)
-                funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
+                options = self._build_fund_options(
+                    fee, fee_rate_override=fee_rate_override
+                )
+                funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
                 actual_fee = funded.get("fee")
                 if actual_fee is not None and abs(actual_fee - fee) > 0.01:
@@ -157,6 +162,7 @@ class TransactionBuilder:
         outputs_payload: list[Dict[str, Any]] | Dict[str, Any],
         fee: float,
         inputs: List[Dict[str, Any]] | None = None,
+        fee_rate_override: float | None = None,
     ) -> str:
         """Build and sign a transaction using preformatted outputs.
 
@@ -190,8 +196,10 @@ class TransactionBuilder:
                 # with exactly one key, and that key must be a valid address string or
                 # "data" (for OP_RETURN). Do not use "script" or other metadata keys here.
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
-                fee_rate = self._estimate_fee_rate(fee)
-                funded = self.rpc.fundrawtransaction(tmp_raw, {"feeRate": fee_rate})
+                options = self._build_fund_options(
+                    fee, fee_rate_override=fee_rate_override
+                )
+                funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
             except RPCError as exc:
                 raise RuntimeError(
@@ -331,3 +339,26 @@ class TransactionBuilder:
         if kvb == 0:
             kvb = 0.001
         return fee / kvb
+
+    def _build_fund_options(
+        self,
+        fee: float,
+        fee_rate_override: float | None = None,
+        options: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Prepare fundrawtransaction-style options with a relay-safe feeRate."""
+
+        options = dict(options or {})
+        if fee_rate_override is not None:
+            options["feeRate"] = fee_rate_override
+
+        if "feeRate" not in options and "fee_rate" not in options:
+            # Ensure inscriptions meet node relay policy:
+            # DigiByte/Bitcoin RPC enforces a min relay fee; without an explicit feeRate
+            # the default estimate can be below that threshold, causing
+            # "min relay fee not met" errors. We choose a conservative default here.
+            options["feeRate"] = max(
+                self._estimate_fee_rate(fee), self.DEFAULT_RELAY_SAFE_FEE_RATE
+            )
+
+        return options
