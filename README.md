@@ -21,6 +21,12 @@ Read this README for a high-level tour, then jump to
 [`docs/TOOLING.md`](docs/TOOLING.md) for CLI workflows or
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for module-level detail.
 
+## DigiByte Taproot Lab Guide
+
+- Step-by-step walkthrough from a fresh DigiByte Core node to your first
+  Taproot inscription, including real-world pitfalls and RPC error hints:
+  [`docs/taproot_inscription_lab.md`](docs/taproot_inscription_lab.md).
+
 ## State Planes & Terminology
 
 | Plane | Conveys | Example usage | Specification |

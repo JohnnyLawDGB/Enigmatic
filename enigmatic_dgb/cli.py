@@ -65,6 +65,7 @@ from .rpc_client import (
     RPCConfig,
     RPCError,
     RPCTransportError,
+    format_rpc_hint,
 )
 from .script_plane import ScriptPlane
 from .session import SessionContext
@@ -765,7 +766,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Build and sign a real inscription transaction. Broadcasting is opt-in; "
             "inscriptions are permanent and may bloat the chain. Review fees and "
-            "payloads carefully before proceeding and start with a dry run."
+            "payloads carefully before proceeding and start with a dry run. "
+            "See docs/taproot_inscription_lab.md for a full tutorial and troubleshooting guide."
         ),
     )
     ord_inscribe_parser.add_argument(
@@ -1951,10 +1953,24 @@ def cmd_ord_plan_taproot(args: argparse.Namespace) -> None:
     )
 
     payload = _parse_inscription_message(args.message)
-    plan = planner.plan_taproot_inscription(
-        payload,
-        metadata={"content_type": args.content_type},
-    )
+    if not payload:
+        raise CLIError(
+            "Your inscription payload is empty. Make sure you passed a non-empty string or file contents into the ord-plan-taproot command."
+        )
+
+    try:
+        plan = planner.plan_taproot_inscription(
+            payload,
+            metadata={"content_type": args.content_type},
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "data too large for single script push" in message:
+            raise CLIError(
+                "Your inscription envelope is too large for a single Taproot script element (max 520 bytes). "
+                "Use compact JSON or implement multi-chunk envelopes. See docs/taproot_inscription_lab.md."
+            ) from exc
+        raise CLIError(f"Failed to plan Taproot inscription: {exc}") from exc
 
     if getattr(args, "as_json", False):
         print(json.dumps(plan, indent=2))
@@ -1987,6 +2003,10 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     planner = OrdinalInscriptionPlanner(rpc, tx_builder=builder)
 
     payload = _parse_inscription_message(args.message)
+    if not payload:
+        raise CLIError(
+            "Your inscription payload is empty. Make sure you passed a non-empty string or file contents into the ord-inscribe command."
+        )
     metadata = {"content_type": args.content_type}
 
     fee_rate_override = None
@@ -2005,7 +2025,17 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
         plan = planner.plan_op_return_inscription(payload, metadata=metadata)
         inscription_hex = payload.hex()
     else:
-        plan = planner.plan_taproot_inscription(payload, metadata=metadata)
+        try:
+            plan = planner.plan_taproot_inscription(payload, metadata=metadata)
+        except ValueError as exc:
+            message = str(exc)
+            if "data too large for single script push" in message:
+                raise CLIError(
+                    "Your inscription envelope is too large for a single Taproot script element (max 520 bytes). "
+                    "Use compact JSON or implement multi-chunk envelopes. See docs/taproot_inscription_lab.md."
+                ) from exc
+            raise CLIError(f"Failed to plan Taproot inscription: {exc}") from exc
+
         inscription_hex = plan.get("metadata", {}).get("taproot_script_hex")
         if not inscription_hex:
             raise CLIError(
@@ -2061,7 +2091,9 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     try:
         txid = rpc.sendrawtransaction(raw_tx)
     except RPCError as exc:
-        raise CLIError(f"Broadcast failed: {exc}") from exc
+        hint = format_rpc_hint(exc)
+        hint_suffix = f"\nHint: {hint}" if hint else ""
+        raise CLIError(f"Broadcast failed: {exc}{hint_suffix}") from exc
 
     print(f"Broadcasted inscription transaction: {txid}")
 
