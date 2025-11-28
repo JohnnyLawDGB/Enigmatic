@@ -135,7 +135,21 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 
 <!-- TODO: add detection playbook diagram showing sliding-window fee/height analysis -->
 
-## 7. Use Cases
+## 7. Taproot Inscriptions (Enigmatic Taproot Dialect v1)
+
+Taproot inscriptions in Enigmatic embed a compact envelope inside a Taproot
+script path without altering DigiByte consensus. The Enigmatic Taproot dialect
+adds a short header—`ENIG` magic, a one-byte version, a length-prefixed content
+type, and raw payload bytes—inside an `OP_FALSE OP_IF ... OP_ENDIF` branch so
+the payload is revealed only when that path is exercised. Wallets spend or
+decode the output like any other Taproot script; observers without the dialect
+see a standard Taproot leaf with data-bearing pushes. Payloads should remain
+small (≤520 bytes for a single script element) to stay relay-safe and avoid
+policy rejections. The CLI surfaces this flow via `ord-plan-taproot` for dry
+runs, `ord-inscribe --scheme taproot` for signing/broadcasting, and
+`ord-decode` for inspection, all aligned with the dialect spec.
+
+## 8. Use Cases
 
 - **Presence and identity beacons** – Heartbeats and HELLO/PRESENCE frames from
   `dialect-heartbeat.yaml` and `dialect-intel.yaml` (replayable via CLI).
@@ -146,7 +160,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 - **Covert session bootstrap** – Optional payload encryption plus OP_RETURN
   commitments to coordinate shared secrets before higher-layer messaging.
 
-## 8. Security, Deniability, and Detection
+## 9. Security, Deniability, and Detection
 
 - **Plausible deniability** – Transactions remain economically rational; fee and
   value choices stay within normal wallet behavior. See
@@ -158,7 +172,7 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
   Δheight expectations, enabling pre-broadcast audits. TODO: formalize the
   indistinguishability bounds for fee jitter.
 
-## 9. Implementation Status (Repository Alignment)
+## 10. Implementation Status (Repository Alignment)
 
 - Specs chapters 01–06 define the planes, model, encoding/decoding processes,
   dialects, and security assumptions.
@@ -170,7 +184,16 @@ validate fee punctuation, block spacing, and cardinality before any funds move.
 - Examples in `../examples/` include dialect YAML files, decoded traces, and
   walkthroughs that can be reproduced with the RPC test plan.
 
-## 10. Planned Enhancements
+## 11. Recent Updates (last 4 days)
+
+- Added a Taproot inscription lab with step-by-step wallet setup, payload size
+  guidance, and troubleshooting for relay policy edge cases and malformed
+  outputs to speed up experimentation on DigiByte Taproot wallets.
+- Hardened ordinal inscription workflows with clearer fee caps, address
+  validation errors, and explicit broadcast toggles so operators can dry-run
+  Taproot inscriptions before committing transactions on-chain.
+
+## 12. Planned Enhancements
 
 Roadmap items tracked in [`expansion-roadmap.md`](expansion-roadmap.md):
 
