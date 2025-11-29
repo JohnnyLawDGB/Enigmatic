@@ -36,6 +36,10 @@ the protocol, tooling, and documentation in lockstep.
 - **Pattern detection research**: Formalize indistinguishability bounds for fee
   jitter and block cadence; publish detection-resistance benchmarks alongside
   example countermeasures.
+- **Layered audio encoding**: Prototype keyed thread extraction for layered
+  audio recordings so only holders of the right keys can decode ordered streams
+  from otherwise chaotic mixes, targeting both security and compression
+  benefits.
 
 ## Adoption milestones
 
