@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+# Preserve caller shell options so sourcing this script does not change their
+# behavior (e.g., leaving `set -e` enabled in the user's shell, which can cause
+# later commands to terminate the shell unexpectedly).
+_bootstrap_previous_opts=$(set +o)
+trap 'eval "${_bootstrap_previous_opts}"; unset _bootstrap_previous_opts' RETURN
+
 set -euo pipefail
 
 # Bootstrap a local environment for the Enigmatic console and CLI.
