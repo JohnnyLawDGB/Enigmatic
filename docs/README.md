@@ -37,3 +37,9 @@ work down the list:
   updates.
 * When adding diagrams, check them into `examples/` or `docs/` with a short ALT
   text description for accessibility.
+
+## Operational runbooks
+
+| File | Why it exists |
+| ---- | ------------- |
+| `digibyte-node-setup.md` | Quickstart for running a DigiByte 8.26 node with txindex, Dandelion relay, and Taproot defaults enabled. |
