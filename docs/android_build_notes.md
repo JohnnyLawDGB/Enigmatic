@@ -25,3 +25,30 @@ android {
 
 This aligns with Gradle 8 and AGP 8's DSL changes and resolves the
 `abiFilters()` missing method error during `assembleDebug`.
+
+## External native build configuration
+
+If your local `android/app/build.gradle` still contains merge-conflict markers
+around the `externalNativeBuild` block (for example, pointing at
+`../jni/CMakeLists.txt`), prefer the configuration that leaves the `cmake`
+settings commented out. The repository does not ship a `jni` directory or a
+`CMakeLists.txt`, and the Android build only packages prebuilt libraries from
+`src/main/jniLibs`. A minimal block that matches the current project layout
+looks like this:
+
+```groovy
+    externalNativeBuild {
+        cmake {
+            // If you actually add JNI sources and a CMakeLists, provide the
+            // path here. Otherwise keep it commented out so Gradle just
+            // packages the existing binaries in src/main/jniLibs.
+            // path file("../jni/CMakeLists.txt")
+
+            // scripts/build-android.sh already sets ABI/platform flags for the
+            // prebuilt libraries, so Gradle does not need extra arguments.
+        }
+    }
+```
+
+This removes the conflict markers while keeping the build aligned with the
+repository's prebuilt native binaries.
