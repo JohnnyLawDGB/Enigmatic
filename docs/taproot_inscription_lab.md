@@ -349,3 +349,20 @@ Taproot inscriptions ride inside normal DigiByte policy and mempool rules. Fundi
 > - Funding UTXOs should ideally confirm before commit/reveal.
 > - RBF is powerful but can force unexpectedly high feerates after repeated bumps.
 > - Never hardcode txids or vout indexes after a bump; always trust `listunspent`.
+
+## Wizard workflow
+
+Use the new Taproot Inscription Wizard to avoid manual sequencing mistakes:
+
+- Launch **interactive mode** from `enigmatic-dgb console` option 9 (Taproot inscription wizard). The flow checks RPC auth (401 emits a credential hint), wallet load state, and shows policy floors from `getmempoolinfo`/`getnetworkinfo`.
+- Choose payload type: plain text, JSON (validated/compacted), or raw hex. The wizard reports payload/envelope/push sizes and refuses Taproot pushes above 520 bytes with options to go back or save a plan.
+- Fees: automatic `estimatesmartfee` with a 10500 sat/vB floor by default, or manual input. A recommended `max-fee-sats` is derived from the current vsize/feerate (e.g., ~1.6M sats → suggest 2,000,000).
+- Dry-run first: signs with `--no-broadcast`, prints vsize/fee summary, and requires typing `BROADCAST` to relay.
+- Post-broadcast: optionally monitor `gettransaction` confirmations and offer `bumpfee` if the tx lingers past a user-defined threshold. The wizard also probes `getmempoolentry` after relay.
+- Receipt: writes `./receipts/ordinal_<txid>.json` capturing payload hex, content-type, wallet, fee choices, txids (including RBF replacements), and confirmation metadata.
+
+Non-interactive example (same flow, CLI flags):
+
+```bash
+enigmatic-dgb ord-wizard --wallet taproot-lab --message "Hello Taproot" --broadcast
+```

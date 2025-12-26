@@ -13,6 +13,27 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
+class TaprootScriptBuilder:
+    """Lightweight helpers for building taproot inscription leaf scripts."""
+
+    @staticmethod
+    def push_single_element(data: bytes) -> bytes:
+        length = len(data)
+        if length <= 75:
+            return bytes([length]) + data
+        if length <= 255:
+            return b"\x4c" + bytes([length]) + data
+        if length <= 520:
+            return b"\x4d" + length.to_bytes(2, "little") + data
+        raise ValueError(f"data too large for single script push: {length} bytes (max 520)")
+
+    @staticmethod
+    def build_enig_leaf(envelope: bytes) -> bytes:
+        """Construct OP_FALSE OP_IF <envelope> OP_ENDIF for Enigmatic dialect."""
+
+        return b"".join([b"\x00\x63", TaprootScriptBuilder.push_single_element(envelope), b"\x68"])
+
+
 @dataclass
 class TaprootScriptView:
     """Summarizes witness and script data for a transaction output."""

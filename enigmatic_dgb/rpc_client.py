@@ -85,6 +85,10 @@ class ConfigurationError(RuntimeError):
 class RPCTransportError(RuntimeError):
     """Raised when the RPC endpoint is unreachable or returns malformed data."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 @dataclass
 class RPCConfig:
@@ -236,7 +240,8 @@ class DigiByteRPCClient:
         except requests.HTTPError as exc:
             logger.debug("RPC HTTP error: %s", exc, exc_info=True)
             raise RPCTransportError(
-                "RPC server returned an HTTP error; check the URL, wallet path, and authentication."
+                "RPC server returned an HTTP error; check the URL, wallet path, and authentication.",
+                status_code=response.status_code,
             ) from exc
         try:
             result = response.json()
@@ -259,6 +264,11 @@ class DigiByteRPCClient:
 
             logger.error("RPC HTTP error %s from %s", response.status_code, response.url)
             logger.error("RPC error body: %s", err_body)
+            if response.status_code == 401:
+                raise RPCTransportError(
+                    "Unauthorized (401). Ensure ENIGMATIC_DGB_RPC_USER/DGB_RPC_USER and password are set, or pass --rpc-user/--rpc-password.",
+                    status_code=response.status_code,
+                )
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
@@ -346,6 +356,18 @@ class DigiByteRPCClient:
 
     def getmempoolinfo(self) -> Dict[str, Any]:
         return self.call("getmempoolinfo")
+    
+    def getmempoolentry(self, txid: str) -> Dict[str, Any]:
+        return self.call("getmempoolentry", [txid])
+
+    def listwallets(self) -> list[str]:
+        return self.call("listwallets")
+
+    def loadwallet(self, wallet: str) -> Dict[str, Any]:
+        return self.call("loadwallet", [wallet])
+
+    def getwalletinfo(self) -> Dict[str, Any]:
+        return self.call("getwalletinfo")
 
     def estimatesmartfee(
         self, conf_target: int, estimate_mode: str | None = None
@@ -380,6 +402,12 @@ class DigiByteRPCClient:
 
     def sendrawtransaction(self, raw_tx: str) -> str:
         return self.call("sendrawtransaction", [raw_tx])
+
+    def bumpfee(self, txid: str, options: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        params: list[Any] = [txid]
+        if options is not None:
+            params.append(options)
+        return self.call("bumpfee", params)
 
 
 # Backward compatibility alias until downstream code is updated.

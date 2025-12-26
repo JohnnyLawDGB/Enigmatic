@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import textwrap
+import time
 import traceback
-from typing import List, Sequence
+from pathlib import Path
+from typing import Any, List, Sequence
 
 from . import cli
 from . import prime_ladder
@@ -23,12 +26,20 @@ from .dtsp import (
 )
 from .dialect import DialectError, load_dialect
 from .model import EncodingConfig
-from .rpc_client import ConfigurationError, DigiByteRPC, RPCError
+from .rpc_client import ConfigurationError, DigiByteRPC, RPCError, RPCTransportError
+from .ordinals.workflows import (
+    compute_taproot_envelope_stats,
+    prepare_inscription_transaction,
+    suggest_max_fee_sats,
+    write_receipt,
+)
+from .fees import calculate_fee_sats, sat_vb_to_dgb_per_kvb
 from .watcher import Watcher
 
 DEFAULT_FEE = 0.21
 DEFAULT_DIALECT = "examples/dialect-showcase.yaml"
 DTSP_GAP_SECONDS = 600.0
+DEFAULT_TAPROOT_WALLET = "taproot-lab"
 
 
 def prompt_str(prompt: str, default: str | None = None) -> str:
@@ -91,6 +102,14 @@ def _should_debug() -> bool:
     return bool(int(os.environ.get("ENIGMATIC_DEBUG", "0")))
 
 
+def _safe_rpc_call(func, *, friendly_name: str) -> tuple[bool, Any]:
+    try:
+        return True, func()
+    except (ConfigurationError, RPCTransportError, RPCError) as exc:
+        print(f"{friendly_name} failed: {exc}")
+        return False, None
+
+
 def run_enigmatic_cli(args: Sequence[str]) -> int:
     """Invoke the Enigmatic CLI via subprocess or internal dispatcher."""
 
@@ -120,6 +139,21 @@ def _pause(message: str = "Press Enter to return to the menu...") -> None:
     input(message)
 
 
+def _prompt_choice(prompt: str, choices: dict[str, str]) -> str:
+    """Prompt for a choice key present in ``choices``.
+
+    Keys are compared in lower-case form and the first character match is
+    accepted. Returns the canonical key as stored in the mapping.
+    """
+
+    while True:
+        raw = input(prompt).strip().lower()
+        for key in choices:
+            if raw == key.lower() or raw == key.lower()[:1]:
+                return key
+        print("Invalid selection, please try again.\n")
+
+
 def _parse_amounts_csv(raw: str) -> List[str]:
     return [piece.strip() for piece in raw.split(",") if piece.strip()]
 
@@ -145,7 +179,7 @@ def handle_quickstart() -> None:
             Fee per tx: {fee}
             Mode: {mode}
             """
-        )
+    )
     )
     if not _confirm():
         print("Cancelled.")
@@ -1146,6 +1180,25 @@ def handle_help() -> None:
     _pause()
 
 
+def _wizard_print_policy(rpc: DigiByteRPC) -> None:
+    ok_mem, mempool = _safe_rpc_call(rpc.getmempoolinfo, friendly_name="getmempoolinfo")
+    ok_net, netinfo = _safe_rpc_call(rpc.getnetworkinfo, friendly_name="getnetworkinfo")
+    if not (ok_mem or ok_net):
+        return
+    mem_min = None
+    inc_fee = None
+    relay_fee = None
+    if isinstance(mempool, dict):
+        mem_min = mempool.get("mempoolminfee")
+    if isinstance(netinfo, dict):
+        inc_fee = netinfo.get("incrementalfee")
+        relay_fee = netinfo.get("minrelaytxfee") or netinfo.get("relayfee")
+    print(
+        "policy: mempoolminfee=%s, incrementalfee=%s, minrelaytxfee=%s (DGB/kvB)"
+        % (mem_min, inc_fee, relay_fee)
+    )
+
+
 def _get_block_height() -> int | None:
     """Fetch the current block height via RPC, returning None on error."""
 
@@ -1156,6 +1209,23 @@ def _get_block_height() -> int | None:
         if _should_debug():
             traceback.print_exc()
         return None
+
+
+def _prompt_multi_line(prompt: str) -> str:
+    print(prompt)
+    print("Enter content, then EOF (Ctrl-D) to finish:")
+    lines: list[str] = []
+    try:
+        while True:
+            line = input()
+            lines.append(line)
+    except EOFError:
+        pass
+    return "\n".join(lines)
+
+
+def _prompt_back_exit() -> bool:
+    return input("[B] Back | [S] Save plan & exit | Enter to continue: ").strip().lower().startswith("b")
 
 
 def _render_menu() -> None:
@@ -1183,6 +1253,7 @@ def _render_menu() -> None:
             [6] Decode / watch ledger activity
             [7] Address analysis (DTSP + binary)
             [8] Prime ladder (ladder steps)
+            [9] Taproot inscription wizard
             [H] Help / Docs pointers
             [Q] Quit
             --------
@@ -1216,10 +1287,259 @@ def console_main() -> None:
             handle_address_analysis()
         elif selection == "8":
             handle_prime_ladder()
+        elif selection == "9":
+            handle_taproot_wizard()
         elif selection in {"h", "?"}:
             handle_help()
         else:
             print("Invalid selection, please try again.\n")
+
+
+def handle_taproot_wizard() -> None:
+    """Interactive Taproot inscription wizard inside the console."""
+
+    print("\nTaproot Inscription Wizard\n" + "-" * 32)
+    wallet_name = prompt_str("Which wallet name?", default=DEFAULT_TAPROOT_WALLET)
+
+    # Environment checks
+    try:
+        rpc = DigiByteRPC.from_env()
+    except (ConfigurationError, RPCTransportError) as exc:
+        message = str(exc)
+        if isinstance(exc, RPCTransportError) and exc.status_code == 401:
+            print(
+                "Unauthorized: set DGB_RPC_USER/DGB_RPC_PASSWORD or pass --rpc-user/--rpc-password"
+            )
+        print(message)
+        _pause()
+        return
+
+    rpc.set_wallet(wallet_name)
+
+    ok_info, info = _safe_rpc_call(rpc.getblockchaininfo, friendly_name="RPC connectivity (getblockchaininfo)")
+    if not ok_info:
+        _pause()
+        return
+
+    ok_wallet, wallet_info = _safe_rpc_call(rpc.getwalletinfo, friendly_name="getwalletinfo")
+    if not ok_wallet:
+        wallets = rpc.listwallets()
+        print(f"Loaded wallets: {wallets}")
+        if wallet_name not in wallets:
+            choice = input(
+                f"Wallet {wallet_name!r} not loaded. Load now with loadwallet? [y/N]: "
+            ).strip().lower()
+            if choice.startswith("y"):
+                _safe_rpc_call(lambda: rpc.loadwallet(wallet_name), friendly_name="loadwallet")
+                ok_wallet, wallet_info = _safe_rpc_call(
+                    rpc.getwalletinfo, friendly_name="getwalletinfo"
+                )
+            else:
+                _pause()
+                return
+    print("Wallet ready.")
+    _wizard_print_policy(rpc)
+
+    # Payload capture
+    while True:
+        print("Choose payload type: (1) Plain text (2) JSON (3) Hex (0x…)")
+        choice = input("Selection [1]: ").strip().lower() or "1"
+        payload_bytes: bytes
+        if choice == "2":
+            raw_json = _prompt_multi_line("Enter JSON payload (blank line to finish)")
+            try:
+                parsed = json.loads(raw_json)
+                payload_bytes = json.dumps(parsed, separators=(",", ":")).encode("utf-8")
+            except json.JSONDecodeError as exc:
+                print(f"JSON parse error: {exc}")
+                continue
+            default_ct = "application/json"
+        elif choice == "3":
+            raw_hex = prompt_str("Hex payload (0x… or plain hex)")
+            raw_hex = raw_hex[2:] if raw_hex.lower().startswith("0x") else raw_hex
+            try:
+                payload_bytes = bytes.fromhex(raw_hex)
+            except ValueError:
+                print("Invalid hex; try again")
+                continue
+            default_ct = "application/octet-stream"
+        else:
+            text = _prompt_multi_line("Enter plain text payload (multi-line supported)")
+            payload_bytes = text.encode("utf-8")
+            default_ct = "text/plain"
+
+        content_type = prompt_str("Content-Type", default=default_ct)
+        try:
+            stats = compute_taproot_envelope_stats(payload_bytes, content_type)
+        except ValueError as exc:
+            print(f"Envelope error: {exc}")
+            back = _prompt_back_exit()
+            if back:
+                return
+            continue
+        print(
+            "Payload bytes=%s | envelope=%s | push=%s | leaf_script=%s"
+            % (
+                stats["payload_bytes"],
+                stats["envelope_bytes"],
+                stats["push_bytes"],
+                stats["leaf_script_bytes"],
+            )
+        )
+        if stats["push_bytes"] > 520:
+            print("Taproot single element push exceeds 520 bytes; cannot proceed.")
+            back = _prompt_back_exit()
+            if back:
+                return
+            continue
+        break
+
+    # Fee selection
+    print("Fee mode: (1) Automatic (2) Manual sats/vB")
+    fee_choice = input("Selection [1]: ").strip().lower() or "1"
+    user_rate = None
+    if fee_choice == "2":
+        raw = prompt_str("sats/vB", default="10500")
+        try:
+            user_rate = float(raw)
+        except ValueError:
+            print("Invalid fee rate; using automatic")
+            user_rate = None
+
+    min_floor_raw = prompt_str("Minimum fee rate floor (sats/vB)", default="10500")
+    try:
+        min_floor = float(min_floor_raw)
+    except ValueError:
+        min_floor = None
+
+    prepared = prepare_inscription_transaction(
+        rpc,
+        payload_bytes,
+        content_type,
+        scheme="taproot",
+        user_fee_rate_satvb=user_rate,
+        min_fee_rate_satvb_floor=min_floor,
+        broadcast=False,
+    )
+
+    est_fee = calculate_fee_sats(prepared.fee_selection.fee_rate_sat_vb, prepared.vsize)
+    suggested_cap = suggest_max_fee_sats(est_fee)
+    print(
+        f"Estimated fee: ~{est_fee} sats (vsize={prepared.vsize} at {prepared.fee_selection.fee_rate_sat_vb:.0f} sat/vB)"
+    )
+    cap_input = prompt_str(
+        f"Set max-fee-sats to {suggested_cap}?", default=str(suggested_cap)
+    )
+    try:
+        max_fee = int(cap_input)
+    except ValueError:
+        max_fee = suggested_cap
+
+    prepared = prepare_inscription_transaction(
+        rpc,
+        payload_bytes,
+        content_type,
+        scheme="taproot",
+        user_fee_rate_satvb=user_rate,
+        min_fee_rate_satvb_floor=min_floor,
+        max_fee_sats=max_fee,
+        broadcast=False,
+    )
+
+    print("Dry run (no broadcast). Summary:")
+    summary = prepared.summary()
+    for key, value in summary.items():
+        print(f"  {key}: {value}")
+    print("Signed hex (truncated):", prepared.raw_tx[:120] + "…")
+
+    proceed = input("Proceed to broadcast? Type BROADCAST to confirm: ").strip()
+    if proceed != "BROADCAST":
+        print("Cancelled before broadcast.")
+        _pause()
+        return
+
+    prepared = prepare_inscription_transaction(
+        rpc,
+        payload_bytes,
+        content_type,
+        scheme="taproot",
+        user_fee_rate_satvb=user_rate,
+        min_fee_rate_satvb_floor=min_floor,
+        max_fee_sats=max_fee,
+        broadcast=True,
+    )
+
+    txid = prepared.txid or "?"
+    print(f"Broadcasted txid: {txid}")
+    _safe_rpc_call(lambda: rpc.getmempoolentry(txid), friendly_name="getmempoolentry (post-broadcast)")
+    _safe_rpc_call(lambda: rpc.gettransaction(txid), friendly_name="gettransaction (wallet)")
+
+    replacements: list[str] = []
+    confirmed_blockhash: str | None = None
+    confirmed_height: int | None = None
+
+    monitor = input("Monitor until confirmed? [y/N]: ").strip().lower().startswith("y")
+    if monitor:
+        threshold_seconds = prompt_int("Auto-bump after how many seconds?", default=120) or 120
+        bump_rate_default = max(prepared.fee_selection.fee_rate_sat_vb, min_floor or 0) + 1000
+        start = time.time()
+        while True:
+            ok_tx, tx_info = _safe_rpc_call(lambda: rpc.gettransaction(txid), friendly_name="gettransaction")
+            if ok_tx and isinstance(tx_info, dict):
+                confirmations = tx_info.get("confirmations") or 0
+                if confirmations > 0:
+                    confirmed_blockhash = tx_info.get("blockhash")
+                    confirmed_height = tx_info.get("blockheight")
+                    print(f"Confirmed in block {confirmed_blockhash} (height {confirmed_height})")
+                    break
+            if time.time() - start >= threshold_seconds:
+                bump_choice = input("Unconfirmed. Bump fee now? [y/N]: ").strip().lower()
+                if bump_choice.startswith("y"):
+                    new_rate_raw = prompt_str("New fee rate (sats/vB)", default=str(int(bump_rate_default)))
+                    try:
+                        new_rate = float(new_rate_raw)
+                    except ValueError:
+                        new_rate = bump_rate_default
+                    try:
+                        bump_resp = rpc.bumpfee(
+                            txid,
+                            {"fee_rate": sat_vb_to_dgb_per_kvb(new_rate)},
+                        )
+                        new_txid = bump_resp.get("txid")
+                        if new_txid:
+                            replacements.append(new_txid)
+                            txid = new_txid
+                            start = time.time()
+                            print(f"Bump successful. New txid: {txid}")
+                            continue
+                        print("bumpfee returned no txid; stopping monitor")
+                        break
+                    except Exception as exc:  # pragma: no cover - RPC path
+                        print(f"bumpfee failed: {exc}")
+                        break
+                else:
+                    print("Monitor stopped without bump.")
+                    break
+            time.sleep(10)
+
+    receipt_path = Path("./receipts") / f"ordinal_{txid}.json"
+    write_receipt(
+        receipt_path,
+        payload_bytes,
+        content_type,
+        {
+            "wallet": wallet_name,
+            "fee_rate_sat_vb": prepared.fee_selection.fee_rate_sat_vb,
+            "max_fee_sats": max_fee,
+            "txids": [prepared.txid] + replacements if prepared.txid else replacements,
+            "final_txid": txid,
+            "scheme": prepared.scheme,
+            "blockhash": confirmed_blockhash,
+            "blockheight": confirmed_height,
+        },
+    )
+    print(f"Receipt saved to {receipt_path}")
+    _pause()\n*** End Patch
 
 
 if __name__ == "__main__":
