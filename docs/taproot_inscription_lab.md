@@ -184,3 +184,83 @@ If you hit an RPC broadcast failure, rerun with `--verbose` to log the JSON-RPC 
 - Sign without broadcast: `enigmatic-dgb ord-inscribe "$MSG" --scheme taproot --wallet taproot-lab --no-broadcast`
 - Broadcast immediately: `enigmatic-dgb ord-inscribe "$MSG" --scheme taproot --wallet taproot-lab --broadcast --max-fee-sats 5000000`
 - Decode after mining/relay: `enigmatic-dgb ord-decode <TXID> --json`
+
+## Fee & mempool realities
+
+Taproot inscriptions ride inside normal DigiByte policy and mempool rules. Funding and commit transactions must satisfy feerate, RBF, and relay constraints just like any other transaction. The example below uses a **real, confirmed** Taproot funding transaction to ground the numbers.
+
+### Worked example: Taproot funding transaction anatomy
+
+- **Transaction metadata**
+  - txid: `510100490839e0b934783eb795edb4d5162a637bf864b1976ad1f9fb36010a8c`
+  - version: 2, locktime: 22688052, confirmations: >10
+  - size: 205 bytes, **vsize: 154 vB**, weight: 616
+  - inputs: 1 (Taproot key-path spend), outputs: 2 (both P2TR)
+  - total fee paid: **0.01627500 DGB**
+
+- **1) Size vs vsize vs weight**
+  - Fee calculation uses **vsize**, not raw `size`.
+  - Relationship: `weight = vsize * 4`. Here `616 weight / 4 = 154 vB`.
+  - RBF and mempool limits are expressed in vbytes; always size transactions with `getmempoolentry`/`fundrawtransaction` outputs, not serialized byte length.
+
+- **2) Fee calculation (real numbers)**
+  - Fee paid: 0.016275 DGB → 1,627,500 base units (DGB has 1e8 base units just like BTC sats).
+  - Effective feerate: `1,627,500 / 154 ≈ 10,570 sat/vB`.
+  - This elevated feerate was needed to satisfy incremental relay/RBF requirements from prior replacements, **not** typical mainnet pressure. Expect far lower feerates in calm mempools.
+
+- **3) Taproot input (key-path spend)**
+  - No `scriptSig` bytes and a single-element `txinwitness` with one Schnorr signature.
+  - That pattern signals a Taproot **key-path spend** (no script-path reveal or annex).
+
+  Trimmed `getrawtransaction` (decoded) fragment:
+
+  ```json
+  {
+    "vin": [
+      {
+        "txid": "...",
+        "vout": 1,
+        "scriptSig": { "asm": "", "hex": "" },
+        "txinwitness": [
+          "snr_sig_hex..."
+        ]
+      }
+    ]
+  }
+  ```
+
+- **4) Taproot outputs (P2TR)**
+  - `vout 0`: **0.0001 DGB** postage-style output to a Taproot address.
+  - `vout 1`: remaining balance returned to a Taproot change/funding output.
+  - Both outputs show `"type": "witness_v1_taproot"` and `"address": "dgb1p..."` (bech32m).
+
+  Trimmed outputs:
+
+  ```json
+  {
+    "vout": [
+      { "value": 0.00010000, "scriptPubKey": { "type": "witness_v1_taproot", "address": "dgb1p..." } },
+      { "value": 9.98...,     "scriptPubKey": { "type": "witness_v1_taproot", "address": "dgb1p..." } }
+    ]
+  }
+  ```
+
+- **5) RBF lifecycle visibility**
+  - `gettransaction` exposes RBF state during fee bumps: `replaces_txid`, `walletconflicts`, and `bip125-replaceable` flip from `"yes"` to `"no"` once confirmed.
+  - After a successful `bumpfee`, the old txid is permanently invalid. Wallets and tooling must re-query UTXOs (`listunspent`) instead of assuming prior `txid:vout` pairs still exist.
+
+  Example (trimmed after confirmation):
+
+  ```json
+  {
+    "confirmations": 12,
+    "replaces_txid": ["old_txid..."],
+    "walletconflicts": [],
+    "bip125-replaceable": "no"
+  }
+  ```
+
+> **Why this matters for inscriptions**
+> - Funding UTXOs should ideally confirm before commit/reveal.
+> - RBF is powerful but can force unexpectedly high feerates after repeated bumps.
+> - Never hardcode txids or vout indexes after a bump; always trust `listunspent`.
