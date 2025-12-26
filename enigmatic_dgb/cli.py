@@ -72,6 +72,22 @@ from .session import SessionContext
 from .symbol_sender import SessionRequiredError, prepare_symbol_send
 from .tx_builder import TransactionBuilder
 from .watcher import Watcher
+from .fees import (
+    DEFAULT_CONF_TARGET,
+    DEFAULT_ESTIMATE_MODE,
+    calculate_fee_sats,
+    format_floors_for_log,
+    sat_vb_to_dgb_per_kvb,
+    select_fee_rate,
+)
+from .fees import (
+    DEFAULT_CONF_TARGET,
+    DEFAULT_ESTIMATE_MODE,
+    FeeSelectionResult,
+    format_floors_for_log,
+    sat_vb_to_dgb_per_kvb,
+    select_fee_rate,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -801,6 +817,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Dry-run: print the raw signed transaction without broadcasting (default)",
     )
+    ord_inscribe_rbf = ord_inscribe_parser.add_mutually_exclusive_group()
+    ord_inscribe_rbf.add_argument(
+        "--rbf",
+        dest="rbf",
+        action="store_true",
+        help="Enable opt-in RBF (default)",
+    )
+    ord_inscribe_rbf.add_argument(
+        "--no-rbf",
+        dest="rbf",
+        action="store_false",
+        help="Disable opt-in RBF (sequence defaults) for the inscription transaction",
+    )
     ord_inscribe_parser.add_argument(
         "--max-fee-sats",
         type=int,
@@ -808,13 +837,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Abort if the estimated fee exceeds this many satoshis (default: %(default)s)",
     )
     ord_inscribe_parser.add_argument(
-        "--fee-rate-sats-per-vbyte",
+        "--fee-rate-satvb",
         type=float,
-        dest="fee_rate_sats_per_vbyte",
         help=(
-            "Override the feeRate passed to wallet funding (sats/vbyte); "
-            "defaults to a conservative relay-safe value"
+            "Explicit fee rate in sat/vB for the inscription transaction. Overrides estimatesmartfee"
         ),
+    )
+    ord_inscribe_parser.add_argument(
+        "--fee-rate-sats-per-vbyte",
+        dest="fee_rate_satvb",
+        type=float,
+        help="Alias for --fee-rate-satvb (deprecated)",
+    )
+    ord_inscribe_parser.add_argument(
+        "--conf-target",
+        type=int,
+        help="Confirmation target passed to estimatesmartfee (default: policy-driven)",
+    )
+    ord_inscribe_parser.add_argument(
+        "--estimate-mode",
+        choices=["economical", "conservative"],
+        help="estimatesmartfee mode (default: conservative)",
+    )
+    ord_inscribe_parser.add_argument(
+        "--min-fee-rate-satvb-floor",
+        type=float,
+        help="Minimum fee rate floor in sat/vB applied after estimation",
     )
     ord_inscribe_parser.add_argument(
         "--wallet-name",
@@ -842,7 +890,7 @@ def build_parser() -> argparse.ArgumentParser:
         const=False,
         help="Force HTTP when contacting the node",
     )
-    ord_inscribe_parser.set_defaults(rpc_use_https=None, broadcast=False)
+    ord_inscribe_parser.set_defaults(rpc_use_https=None, broadcast=False, rbf=True)
 
     ord_mine_parser = subparsers.add_parser(
         "ord-mine",
@@ -2009,10 +2057,6 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
         )
     metadata = {"content_type": args.content_type}
 
-    fee_rate_override = None
-    if args.fee_rate_sats_per_vbyte is not None:
-        fee_rate_override = (args.fee_rate_sats_per_vbyte * 1000) / 1e8
-
     logger.debug(
         "ord-inscribe scheme=%s content_type=%s broadcast=%s max_fee_sats=%s",
         args.scheme,
@@ -2046,8 +2090,6 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     if estimated_fee is None:
         raise CLIError("Planner did not provide an estimated fee; refusing to proceed")
 
-    _enforce_fee_cap(estimated_fee, args.max_fee_sats)
-
     print(
         "WARNING: inscriptions are permanent, may increase chain bloat, and the payload/fee is your responsibility."
     )
@@ -2055,13 +2097,33 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
         "Tip: run with --no-broadcast (default) and a low --max-fee-sats to review the signed hex before relaying."
     )
 
+    fee_selection = select_fee_rate(
+        rpc,
+        conf_target=args.conf_target or DEFAULT_CONF_TARGET,
+        estimate_mode=args.estimate_mode or DEFAULT_ESTIMATE_MODE,
+        user_fee_rate_satvb=args.fee_rate_satvb,
+        min_fee_rate_satvb_floor=args.min_fee_rate_satvb_floor,
+    )
+    fee_rate_override = sat_vb_to_dgb_per_kvb(fee_selection.fee_rate_sat_vb)
+    guess_fee_sats = calculate_fee_sats(fee_selection.fee_rate_sat_vb, 250)
+    guess_fee_dgb = guess_fee_sats / 1e8
+
+    logger.info(
+        "Fee selection source=%s rate=%.2f sat/vB floors=[%s] guess_fee=%s sats",
+        fee_selection.source,
+        fee_selection.fee_rate_sat_vb,
+        format_floors_for_log(fee_selection.floors_applied),
+        guess_fee_sats,
+    )
+
     try:
         if args.scheme == "op-return":
             raw_tx = builder.build_payment_tx(
                 {},
-                float(estimated_fee),
+                float(guess_fee_dgb),
                 op_return_data=[inscription_hex],
                 fee_rate_override=fee_rate_override,
+                replaceable=args.rbf,
             )
         else:
             try:
@@ -2072,13 +2134,43 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
             outputs_payload = [{inscription_address: 0.0001}]
             raw_tx = builder.build_custom_tx(
                 outputs_payload,
-                float(estimated_fee),
+                float(guess_fee_dgb),
                 fee_rate_override=fee_rate_override,
+                replaceable=args.rbf,
             )
     except RuntimeError as exc:
         raise CLIError(
             f"Failed to build or sign the inscription transaction: {exc}"
         ) from exc
+
+    decoded = rpc.decoderawtransaction(raw_tx)
+    vsize = decoded.get("vsize") or decoded.get("size")
+    if vsize is None:
+        raise CLIError("Could not decode vsize for inscription transaction; aborting")
+    vsize_int = int(vsize)
+    fee_selection = fee_selection.with_vsize(vsize_int)
+    computed_fee_sats = fee_selection.fee_sats or 0
+    computed_fee_dgb = computed_fee_sats / 1e8
+
+    if args.max_fee_sats is not None and computed_fee_sats > args.max_fee_sats:
+        raise CLIError(
+            f"Computed fee {computed_fee_sats} sats exceeds max-fee-sats {args.max_fee_sats}; "
+            "increase --max-fee-sats or lower --fee-rate-satvb/--conf-target"
+        )
+
+    logger.info(
+        "Inscription tx vsize=%s fee_rate=%.2f sat/vB computed_fee=%s sats (%.8f DGB) max_fee_sats=%s floors=[%s]",
+        vsize_int,
+        fee_selection.fee_rate_sat_vb,
+        computed_fee_sats,
+        computed_fee_dgb,
+        args.max_fee_sats,
+        format_floors_for_log(fee_selection.floors_applied),
+    )
+    print(
+        f"Fee summary: vsize={vsize_int} vB | fee_rate={fee_selection.fee_rate_sat_vb:.2f} sat/vB | "
+        f"fee={computed_fee_sats} sats ({computed_fee_dgb:.8f} DGB) | max_fee_sats={args.max_fee_sats}"
+    )
 
     if not args.broadcast:
         print("Broadcast disabled (--no-broadcast). Signed transaction (hex):")

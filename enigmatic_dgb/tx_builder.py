@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from .rpc_client import DigiByteRPC, RPCError
 from .script_plane import ScriptPlane
+from .fees import sat_vb_to_dgb_per_kvb
+from .fees import sat_vb_to_dgb_per_kvb
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ class TransactionBuilder:
         inputs: List[Dict[str, Any]] | None = None,
         script_plane: ScriptPlane | None = None,
         fee_rate_override: float | None = None,
+        replaceable: bool | None = None,
     ) -> str:
         """Create a signed raw transaction paying outputs with the provided fee."""
 
@@ -115,7 +118,7 @@ class TransactionBuilder:
                 logger.debug("Attempting automatic funding via fundrawtransaction")
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 options = self._build_fund_options(
-                    fee, fee_rate_override=fee_rate_override
+                    fee, fee_rate_override=fee_rate_override, replaceable=replaceable
                 )
                 funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
@@ -163,6 +166,7 @@ class TransactionBuilder:
         fee: float,
         inputs: List[Dict[str, Any]] | None = None,
         fee_rate_override: float | None = None,
+        replaceable: bool | None = None,
     ) -> str:
         """Build and sign a transaction using preformatted outputs.
 
@@ -197,7 +201,7 @@ class TransactionBuilder:
                 # "data" (for OP_RETURN). Do not use "script" or other metadata keys here.
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 options = self._build_fund_options(
-                    fee, fee_rate_override=fee_rate_override
+                    fee, fee_rate_override=fee_rate_override, replaceable=replaceable
                 )
                 funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
@@ -345,6 +349,7 @@ class TransactionBuilder:
         fee: float,
         fee_rate_override: float | None = None,
         options: Dict[str, Any] | None = None,
+        replaceable: bool | None = None,
     ) -> Dict[str, Any]:
         """Prepare fundrawtransaction-style options with a relay-safe feeRate."""
 
@@ -360,5 +365,15 @@ class TransactionBuilder:
             options["feeRate"] = max(
                 self._estimate_fee_rate(fee), self.DEFAULT_RELAY_SAFE_FEE_RATE
             )
+
+        if replaceable is not None:
+            options.setdefault("replaceable", bool(replaceable))
+
+        # Backward compatibility: accept sats/vbyte overrides by converting to coin/kvB
+        if isinstance(options.get("feeRate"), (int, float)):
+            # Some callers may pass sats/vbyte; detect likely magnitudes (>1.0)
+            fee_rate_val = float(options["feeRate"])
+            if fee_rate_val > 1.0:
+                options["feeRate"] = sat_vb_to_dgb_per_kvb(fee_rate_val)
 
         return options

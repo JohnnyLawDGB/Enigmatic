@@ -341,6 +341,20 @@ class DigiByteRPCClient:
     def getbalance(self) -> float:
         return self.call("getbalance")
 
+    def getnetworkinfo(self) -> Dict[str, Any]:
+        return self.call("getnetworkinfo")
+
+    def getmempoolinfo(self) -> Dict[str, Any]:
+        return self.call("getmempoolinfo")
+
+    def estimatesmartfee(
+        self, conf_target: int, estimate_mode: str | None = None
+    ) -> Dict[str, Any]:
+        params: list[Any] = [conf_target]
+        if estimate_mode is not None:
+            params.append(estimate_mode)
+        return self.call("estimatesmartfee", params)
+
     def gettransaction(
         self, txid: str, include_watchonly: bool = True
     ) -> Dict[str, Any]:
