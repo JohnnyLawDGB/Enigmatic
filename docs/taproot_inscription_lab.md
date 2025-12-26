@@ -193,6 +193,7 @@ enigmatic-dgb ord-inscribe "$MSG" \
   --content-type application/json \
   --wallet taproot-lab \
   --max-fee-sats 100000 \
+  --fee-rate-satvb 12000 \
   --no-broadcast
 ```
 
@@ -215,6 +216,8 @@ enigmatic-dgb ord-inscribe "$MSG" \
   --content-type application/json \
   --wallet taproot-lab \
   --max-fee-sats 5000000 \
+  --conf-target 2 \
+  --estimate-mode conservative \
   --broadcast
 ```
 
@@ -256,6 +259,7 @@ If you hit an RPC broadcast failure, rerun with `--verbose` to log the JSON-RPC 
 - Run `listunspent` with/without `minconf=1` to confirm the funding UTXO is visible.
 - Use `getmempoolentry <txid>` to see if the funding transaction is in the mempool (height ≠ confirmations).
 - If bumping, pick **either** `fee_rate` (sat/vB) or `estimate_mode`, not both.
+- Prefer passing `--fee-rate-satvb <value>` to avoid low-fee stalls. The CLI now logs `vsize`, `fee_rate`, and computed fee (sats/DGB) before broadcasting and will reject fees above `--max-fee-sats`.
 - After `bumpfee`, capture the new `txid` and ignore the old one for commit/reveal.
 - Re-run `gettransaction <newtxid>` and `listunspent` to verify the confirmed funding UTXO before inscribing.
 
