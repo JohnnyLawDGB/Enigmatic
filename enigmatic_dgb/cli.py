@@ -17,6 +17,7 @@ import logging
 import sys
 from collections import defaultdict, OrderedDict
 from datetime import datetime
+from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Sequence
 from uuid import uuid4
@@ -58,6 +59,12 @@ from .ordinals import (
     OrdinalOwnershipView,
     OrdinalScanConfig,
 )
+from .ordinals.workflows import (
+    compute_taproot_envelope_stats,
+    prepare_inscription_transaction,
+    suggest_max_fee_sats,
+    write_receipt,
+)
 from .ordinals.index_store import SQLiteOrdinalIndexStore
 from .rpc_client import (
     ConfigurationError,
@@ -94,6 +101,7 @@ logger = logging.getLogger(__name__)
 
 COMPACT_JSON_SEPARATORS = (",", ":")
 MAX_OUTPUTS_PER_TX = 50
+TAPROOT_WIZARD_DEFAULT_WALLET = "taproot-lab"
 
 
 class CLIError(RuntimeError):
@@ -891,6 +899,73 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force HTTP when contacting the node",
     )
     ord_inscribe_parser.set_defaults(rpc_use_https=None, broadcast=False, rbf=True)
+    ord_wizard_parser = subparsers.add_parser(
+        "ord-wizard",
+        help="Guided Taproot inscription wizard (interactive or parameterized)",
+    )
+    ord_wizard_parser.add_argument("--message", help="Payload message (plain text)")
+    ord_wizard_parser.add_argument(
+        "--payload-json", help="Inline JSON payload (validated and compacted)"
+    )
+    ord_wizard_parser.add_argument(
+        "--payload-hex",
+        help="Hex payload (0x prefix optional) for raw content",
+    )
+    ord_wizard_parser.add_argument(
+        "--payload-file",
+        help="Path to a file to use as the payload (raw bytes)",
+    )
+    ord_wizard_parser.add_argument(
+        "--content-type",
+        help="Content-Type header to embed (default text/plain or application/json)",
+    )
+    ord_wizard_parser.add_argument(
+        "--fee-rate-satvb",
+        type=float,
+        help="Override fee rate in sat/vB (otherwise auto-select with floors)",
+    )
+    ord_wizard_parser.add_argument(
+        "--min-fee-rate-satvb-floor",
+        type=float,
+        default=10500,
+        help="Minimum fee rate floor in sat/vB (default: 10500 for lab)",
+    )
+    ord_wizard_parser.add_argument(
+        "--max-fee-sats", type=int, help="Fee cap in satoshis (recommended auto if omitted)"
+    )
+    ord_wizard_parser.add_argument(
+        "--wallet",
+        default=TAPROOT_WIZARD_DEFAULT_WALLET,
+        help="Wallet name to load for inscription funding (default: taproot-lab)",
+    )
+    ord_wizard_parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="Broadcast the inscription after dry-run review",
+    )
+    ord_wizard_parser.add_argument(
+        "--no-broadcast",
+        action="store_false",
+        dest="broadcast",
+        help="Do not broadcast (review-only plan)",
+    )
+    ord_wizard_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
+    ord_wizard_parser.add_argument("--rpc-host", help="Override RPC host")
+    ord_wizard_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
+    ord_wizard_parser.add_argument("--rpc-user", help="Override RPC username")
+    ord_wizard_parser.add_argument("--rpc-password", help="Override RPC password")
+    ord_wizard_parser.add_argument(
+        "--rpc-wallet",
+        help="Override RPC wallet name (default: taproot-lab unless --wallet provided)",
+    )
+    ord_wizard_https_group = ord_wizard_parser.add_mutually_exclusive_group()
+    ord_wizard_https_group.add_argument(
+        "--rpc-use-https", action="store_true", help="Force HTTPS for RPC"
+    )
+    ord_wizard_https_group.add_argument(
+        "--rpc-no-https", action="store_false", dest="rpc_use_https", help="Disable HTTPS for RPC"
+    )
+    ord_wizard_parser.set_defaults(rpc_use_https=None, broadcast=False)
 
     ord_mine_parser = subparsers.add_parser(
         "ord-mine",
@@ -2190,6 +2265,129 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     print(f"Broadcasted inscription transaction: {txid}")
 
 
+def _resolve_wizard_payload(args: argparse.Namespace) -> tuple[bytes, str]:
+    if args.payload_file:
+        payload_path = Path(args.payload_file).expanduser()
+        if not payload_path.exists():
+            raise CLIError(f"Payload file not found: {payload_path}")
+        return payload_path.read_bytes(), args.content_type or "application/octet-stream"
+    if args.payload_hex:
+        raw = args.payload_hex[2:] if args.payload_hex.lower().startswith("0x") else args.payload_hex
+        try:
+            return bytes.fromhex(raw), args.content_type or "application/octet-stream"
+        except ValueError as exc:
+            raise CLIError("invalid hex provided for --payload-hex") from exc
+    if args.payload_json:
+        try:
+            parsed = json.loads(args.payload_json)
+        except json.JSONDecodeError as exc:
+            raise CLIError(f"invalid JSON for --payload-json: {exc}") from exc
+        payload = json.dumps(parsed, separators=COMPACT_JSON_SEPARATORS).encode("utf-8")
+        return payload, args.content_type or "application/json"
+    if args.message is not None:
+        return args.message.encode("utf-8"), args.content_type or "text/plain"
+    raise CLIError(
+        "Provide --message/--payload-json/--payload-hex/--payload-file or launch the interactive console (enigmatic-dgb console) for the wizard."
+    )
+
+
+def cmd_ord_wizard(args: argparse.Namespace) -> None:
+    if all(
+        option is None
+        for option in (
+            args.message,
+            args.payload_json,
+            args.payload_hex,
+            args.payload_file,
+        )
+    ):
+        # Fall back to the interactive console wizard.
+        from . import console
+
+        console.handle_taproot_wizard()
+        return
+
+    payload_bytes, inferred_content_type = _resolve_wizard_payload(args)
+    content_type = args.content_type or inferred_content_type
+
+    rpc = DigiByteRPC(
+        RPCConfig.from_sources(
+            user=args.rpc_user,
+            password=args.rpc_password,
+            host=args.rpc_host,
+            port=args.rpc_port,
+            use_https=args.rpc_use_https,
+            wallet=args.rpc_wallet or args.wallet or TAPROOT_WIZARD_DEFAULT_WALLET,
+            endpoint=args.rpc_url,
+        )
+    )
+
+    try:
+        stats = compute_taproot_envelope_stats(payload_bytes, content_type)
+    except ValueError as exc:
+        raise CLIError(
+            "Taproot envelope exceeds single-element policy (520 bytes). Shorten or chunk the payload."
+        ) from exc
+
+    if stats["push_bytes"] > 520:
+        raise CLIError(
+            "Taproot single script element exceeds 520 bytes; shorten payload or use --scheme op-return."
+        )
+
+    print(
+        f"Envelope stats: payload={stats['payload_bytes']} bytes | envelope={stats['envelope_bytes']} | push={stats['push_bytes']}"
+    )
+
+    prepared = prepare_inscription_transaction(
+        rpc,
+        payload_bytes,
+        content_type,
+        scheme="taproot",
+        user_fee_rate_satvb=args.fee_rate_satvb,
+        min_fee_rate_satvb_floor=args.min_fee_rate_satvb_floor,
+        max_fee_sats=None,
+        broadcast=False,
+    )
+    estimated_fee = prepared.computed_fee_sats
+    recommended_cap = args.max_fee_sats or suggest_max_fee_sats(estimated_fee)
+    print(
+        f"Estimated fee: {estimated_fee} sats at {prepared.fee_selection.fee_rate_sat_vb:.2f} sat/vB (vsize={prepared.vsize}). "
+        f"Recommended max-fee-sats: {recommended_cap}"
+    )
+
+    if args.broadcast:
+        prepared = prepare_inscription_transaction(
+            rpc,
+            payload_bytes,
+            content_type,
+            scheme="taproot",
+            user_fee_rate_satvb=args.fee_rate_satvb,
+            min_fee_rate_satvb_floor=args.min_fee_rate_satvb_floor,
+            max_fee_sats=recommended_cap,
+            broadcast=True,
+        )
+
+    summary = prepared.summary()
+    print(json.dumps(summary, indent=2))
+    if prepared.txid:
+        receipt_path = (
+            Path("./receipts")
+            / f"ordinal_{prepared.txid}_{int(datetime.utcnow().timestamp())}.json"
+        )
+        write_receipt(
+            receipt_path,
+            payload_bytes,
+            content_type,
+            {
+                "wallet": args.rpc_wallet or args.wallet or TAPROOT_WIZARD_DEFAULT_WALLET,
+                "fee_rate_sat_vb": prepared.fee_selection.fee_rate_sat_vb,
+                "max_fee_sats": recommended_cap,
+                "txid": prepared.txid,
+            },
+        )
+        print(f"Receipt saved to {receipt_path}")
+
+
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
     rpc = _rpc_from_automation_args(
@@ -2547,6 +2745,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_ord_plan_taproot(args)
         elif args.command == "ord-inscribe":
             cmd_ord_inscribe(args)
+        elif args.command == "ord-wizard":
+            cmd_ord_wizard(args)
         elif args.command == "send-symbol":
             cmd_send_symbol(args)
         elif args.command == "plan-symbol":
