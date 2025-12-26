@@ -74,6 +74,79 @@ Check balances from `taproot-lab`:
 digibyte-cli -rpcwallet=taproot-lab getbalances
 ```
 
+## Fee & mempool realities (DigiByte Core + Taproot inscriptions)
+
+### Why `listunspent` can be empty even when you have balance
+
+`listunspent` defaults to `minconf=1`, so a fresh 0-conf funding transaction will not appear. The wallet balance may still show “trusted” funds.
+
+```bash
+digibyte-cli -rpcwallet=<wallet> listunspent
+digibyte-cli -rpcwallet=<wallet> listunspent 0 9999999 [] true
+```
+
+**Guidance:** wait for 1 confirmation before selecting funding UTXOs for commit/reveal to avoid fragile chains.
+
+### Check whether your funding tx is actually in mempool
+
+```bash
+digibyte-cli getmempoolentry <txid>
+```
+
+The `height` field is when the transaction entered the mempool (not confirmations). A 0-conf transaction can still show a `height` value.
+
+### RBF bumping a funding tx (`bumpfee`)
+
+```bash
+digibyte-cli -rpcwallet=<wallet> help bumpfee
+```
+
+- `fee_rate` is **sat/vB** on 0.21+ semantics.
+- Do **not** combine `fee_rate` and `estimate_mode`; pick one.
+- Node policy (incremental/required fee) can demand much larger total fees than a small “+10 sat/vB” bump.
+
+Estimator-based bump:
+
+```bash
+digibyte-cli -rpcwallet=<wallet> bumpfee <txid> '{"conf_target": 2, "estimate_mode": "conservative"}'
+```
+
+Manual bump (example that satisfied a strict policy):
+
+```bash
+digibyte-cli -rpcwallet=<wallet> bumpfee <txid> '{"fee_rate": 10500, "replaceable": true}'
+```
+
+> **Warning:** After `bumpfee` succeeds, the old `txid` is invalidated. Re-query your wallet/UTXOs and use the new `txid` for inscriptions or spend selection.
+
+Illustrative numbers from our run (not protocol requirements):
+
+- Funding tx vsize ≈ 154 vB, initial fee ≈ 0.00003100 DGB (~20 sat/vB if 1 DGB = 1e8 sat-like units).
+- `bumpfee` needed a total fee around 0.0155 DGB to clear policy; the manual bump above succeeded.
+- `bumpfee` returned a new `txid`, and `walletconflicts` contained the old one.
+
+### How to verify which txid actually confirmed
+
+```bash
+digibyte-cli -rpcwallet=<wallet> gettransaction <newtxid>
+```
+
+Useful fields:
+
+- `confirmations`
+- `walletconflicts` (shows the old `txid` if replaced)
+- `replaces_txid` (old `txid`)
+
+Then re-list spendable outputs:
+
+```bash
+digibyte-cli -rpcwallet=<wallet> listunspent
+# or include 0-conf if you must:
+digibyte-cli -rpcwallet=<wallet> listunspent 0 9999999 [] true
+```
+
+**Practical takeaway:** funding inscriptions with a confirmed UTXO is the boring but reliable path. If you use 0-conf, be explicit about mempool chaining and track replacement `txid`s.
+
 ## 4) Build a compact JSON payload (<= 520-byte script element)
 
 Taproot inscriptions store the envelope in a single `PUSHDATA` element, so **520 bytes is the hard limit** for this lab. Avoid pretty-printed JSON or long keys unless you implement multi-chunk envelopes.
@@ -177,6 +250,14 @@ enigmatic-dgb ord-decode <TXID> --json
 | `Your inscription payload is empty` | CLI received a zero-length payload. | Ensure the message/file contains data before calling `ord-plan-taproot` or `ord-inscribe`. |
 
 If you hit an RPC broadcast failure, rerun with `--verbose` to log the JSON-RPC error body. The CLI will also print hints for the errors above.
+
+### Troubleshooting checklist (fees/mempool)
+
+- Run `listunspent` with/without `minconf=1` to confirm the funding UTXO is visible.
+- Use `getmempoolentry <txid>` to see if the funding transaction is in the mempool (height ≠ confirmations).
+- If bumping, pick **either** `fee_rate` (sat/vB) or `estimate_mode`, not both.
+- After `bumpfee`, capture the new `txid` and ignore the old one for commit/reveal.
+- Re-run `gettransaction <newtxid>` and `listunspent` to verify the confirmed funding UTXO before inscribing.
 
 ## Quick reference commands
 
