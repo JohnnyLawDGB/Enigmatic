@@ -35,4 +35,19 @@ def test_generate_address_pads_long_messages_to_base_length():
     expected_body = (f"DCx{_normalize_body(long_message)}").ljust(28, "z").ljust(34, "X")
     expected_payload = base58_decode(expected_body, _prefix_to_version("DCx"))
 
-    assert decode_address(address, "DCx") == expected_payload
+    prefix, message = decode_address(address)
+
+    assert prefix == "DCx"
+    assert base58_decode(address, _prefix_to_version("DCx")) == expected_payload
+    assert message
+
+
+def test_decode_round_trips_prefix_and_message():
+    prefix = "DBx"
+    message = "YoUTUBEvCoM"
+
+    address = generate_address(prefix, message)
+    decoded_prefix, decoded_message = decode_address(address)
+
+    assert decoded_prefix == prefix
+    assert decoded_message == message
