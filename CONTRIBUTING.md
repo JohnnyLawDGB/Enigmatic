@@ -44,6 +44,8 @@ new folks can get productive quickly.
   the only place that holds state.
 * If you add a new example or dialect, document it in `examples/README.md` so
   others know how to replay it.
+* If you introduce a new CLI command, document it in both `docs/TOOLING.md` and
+  `docs/simple_usage.md` to keep quickstarts and deep dives aligned.
 
 ## 4. Tests and validation
 
