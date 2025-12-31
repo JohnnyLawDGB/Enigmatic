@@ -145,6 +145,10 @@ def _normalize_body(body: str) -> str:
     """Normalize the message body using the DiMECASH mapping."""
     normalized: List[str] = []
     for character in body:
+        if character in b58_digits:
+            normalized.append(character)
+            continue
+
         mapping_index = b58_dcmap.find(character)
         if mapping_index != -1:
             normalized.append(b58_digits[mapping_index])
@@ -160,10 +164,6 @@ def _normalize_body(body: str) -> str:
             normalized.append("y")
             continue
 
-        if character in b58_digits:
-            normalized.append(character)
-            continue
-
         raise ValueError(f"Unsupported body character: {character}")
 
     if not normalized:
@@ -177,6 +177,11 @@ def _prefix_to_version(prefix: str) -> bytes:
         raise ValueError("Prefix must not be empty.")
     if any(character not in b58_digits for character in prefix):
         raise ValueError("Prefix must contain only Base58 characters.")
+    if prefix not in _DOGE_FAVORITE_PREFIXES:
+        if len(prefix) != 3:
+            raise ValueError("Prefix must be exactly three characters long.")
+        if prefix[0] != "D" or prefix[2] != "x" or prefix[1] not in {"A", "B", "C", "D", "E"}:
+            raise ValueError("Prefix must match the D[A-E]x pattern.")
 
     first_char = prefix[0]
     try:
