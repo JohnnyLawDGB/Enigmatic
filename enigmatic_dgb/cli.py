@@ -14,6 +14,7 @@ import base64
 import binascii
 import json
 import logging
+from math import isclose
 import shutil
 import subprocess
 import sys
@@ -107,6 +108,34 @@ logger = logging.getLogger(__name__)
 COMPACT_JSON_SEPARATORS = (",", ":")
 MAX_OUTPUTS_PER_TX = 50
 TAPROOT_WIZARD_DEFAULT_WALLET = "taproot-lab"
+
+RESERVED_PLANE_MARKERS = (
+    # Table 2.8 reserved combinations for value, fee, cardinality, and cadence.
+    {
+        "name": "FRAME_SYNC",
+        "value": Decimal("21.21"),
+        "fee": Decimal("0.21"),
+        "m": 21,
+        "n": 21,
+        "delta": 3,
+    },
+    {
+        "name": "HEARTBEAT",
+        "value": Decimal("7.00"),
+        "fee": Decimal("0.21"),
+        "m": 3,
+        "n": 3,
+        "delta": 3,
+    },
+    {
+        "name": "CONSENSUS_PROOF",
+        "value": Decimal("11.11"),
+        "fee": Decimal("2.10"),
+        "m": 13,
+        "n": 13,
+        "delta": 1,
+    },
+)
 
 
 class CLIError(RuntimeError):
@@ -456,6 +485,36 @@ def build_parser() -> argparse.ArgumentParser:
             "Interactive quickstart wizard for beginners (guides dependency checks, RPC config, "
             "and first actions; advanced users can still call granular commands directly)"
         ),
+    )
+
+    dialect_parser = subparsers.add_parser(
+        "dialect", help="List, validate, or generate dialect YAML files"
+    )
+    dialect_subparsers = dialect_parser.add_subparsers(dest="dialect_command", required=True)
+    dialect_list = dialect_subparsers.add_parser(
+        "list", help="List built-in and user-provided dialect files"
+    )
+    dialect_list.add_argument(
+        "--dialect-dir",
+        action="append",
+        dest="dialect_dirs",
+        help="Additional directory to search for dialect YAML files (can be repeated)",
+    )
+    dialect_validate = dialect_subparsers.add_parser(
+        "validate", help="Lint a dialect file for structure and reserved markers"
+    )
+    dialect_validate.add_argument("path", help="Path to the dialect YAML file")
+    dialect_generate = dialect_subparsers.add_parser(
+        "generate", help="Interactively scaffold a new dialect YAML file"
+    )
+    dialect_generate.add_argument(
+        "--output-path",
+        help="Where to write the generated dialect file (default: examples/dialect-new.yaml)",
+    )
+    dialect_generate.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the output file if it already exists",
     )
 
     send_parser = subparsers.add_parser(
@@ -2734,6 +2793,220 @@ def _enforce_fee_cap(estimated_fee_dgb: float, fee_cap_sats: int | None) -> None
         )
 
 
+def _discover_dialect_paths(extra_dirs: Sequence[str]) -> list[Path]:
+    """Return all dialect YAML files across built-in and user-provided directories."""
+
+    search_roots = [Path("examples")]
+    for raw in extra_dirs:
+        candidate = Path(raw).expanduser()
+        if candidate not in search_roots:
+            search_roots.append(candidate)
+
+    seen: set[Path] = set()
+    paths: list[Path] = []
+    for root in search_roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for pattern in ("*.yaml", "*.yml"):
+            for path in sorted(root.glob(pattern)):
+                if path not in seen:
+                    paths.append(path)
+                    seen.add(path)
+    return paths
+
+
+def _coerce_decimal(value: Any, label: str) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError) as exc:
+        raise CLIError(f"{label} must be numeric; got {value!r}") from exc
+
+
+def _lint_dialect_file(path: Path) -> dict[str, Any]:
+    """Validate dialect YAML structure and highlight reserved markers."""
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    reserved_hits: list[str] = []
+
+    if not path.exists():
+        raise CLIError(f"Dialect file does not exist: {path}")
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise CLIError(f"Failed to parse dialect YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        errors.append("Top-level structure must be a mapping.")
+        return {"errors": errors, "warnings": warnings, "reserved": reserved_hits}
+
+    if not data.get("name"):
+        warnings.append("Dialect is missing a name.")
+
+    symbols = data.get("symbols")
+    if symbols is None:
+        errors.append("Dialect must define a symbols section.")
+        return {"errors": errors, "warnings": warnings, "reserved": reserved_hits}
+
+    match_entries: list[tuple[str, dict[str, Any]]] = []
+    if isinstance(symbols, list):
+        for entry in symbols:
+            if not isinstance(entry, dict):
+                warnings.append("Encountered a non-mapping symbol entry; skipping.")
+                continue
+            symbol_name = str(entry.get("name", "<unnamed>"))
+            match_block = entry.get("match")
+            if isinstance(match_block, dict):
+                match_entries.append((symbol_name, match_block))
+            else:
+                warnings.append(f"Symbol {symbol_name} is missing a match block.")
+    elif isinstance(symbols, dict):
+        for symbol_name, body in symbols.items():
+            if isinstance(body, dict) and isinstance(body.get("match"), dict):
+                match_entries.append((str(symbol_name), body["match"]))
+    else:
+        errors.append("symbols section must be a mapping or a list.")
+
+    for symbol_name, match in match_entries:
+        try:
+            value = _coerce_decimal(match.get("value"), f"Symbol {symbol_name} value")
+            fee = _coerce_decimal(match.get("fee"), f"Symbol {symbol_name} fee")
+        except CLIError as exc:
+            errors.append(str(exc))
+            continue
+        try:
+            m = int(match.get("m")) if match.get("m") is not None else None
+            n = int(match.get("n")) if match.get("n") is not None else None
+            delta = int(match.get("delta")) if match.get("delta") is not None else None
+        except (TypeError, ValueError) as exc:
+            errors.append(f"Symbol {symbol_name} m/n/delta must be integers: {exc}")
+            continue
+
+        for reserved in RESERVED_PLANE_MARKERS:
+            if m is None or n is None or delta is None:
+                continue
+            if (
+                isclose(value, reserved["value"])
+                and isclose(fee, reserved["fee"])
+                and m == reserved["m"]
+                and n == reserved["n"]
+                and delta == reserved["delta"]
+            ):
+                reserved_hits.append(reserved["name"])
+                if symbol_name != reserved["name"]:
+                    warnings.append(
+                        f"Symbol {symbol_name} reuses reserved marker {reserved['name']} — rename or adjust planes."
+                    )
+
+    return {"errors": errors, "warnings": warnings, "reserved": reserved_hits}
+
+
+def cmd_dialect_list(args: argparse.Namespace) -> None:
+    """List dialect YAML files from built-in and user-provided directories."""
+
+    paths = _discover_dialect_paths(args.dialect_dirs or [])
+    if not paths:
+        raise CLIError(
+            "No dialect files found. Provide --dialect-dir to search additional locations."
+        )
+
+    print("Discovered dialect files:")
+    for path in paths:
+        try:
+            rel = path.relative_to(Path.cwd())
+        except ValueError:
+            rel = path
+        print(f"- {rel}")
+
+
+def cmd_dialect_validate(args: argparse.Namespace) -> None:
+    """Lint a dialect file for YAML structure and reserved marker collisions."""
+
+    report = _lint_dialect_file(Path(args.path))
+    if report["errors"]:
+        joined = "\n- ".join(report["errors"])
+        raise CLIError(f"Dialect validation failed:\n- {joined}")
+
+    print(f"Dialect {args.path} is structurally valid.")
+    if report["reserved"]:
+        print(
+            "Reserved marker alignment:\n- "
+            + "\n- ".join(sorted(set(report["reserved"])))
+        )
+    if report["warnings"]:
+        print("Warnings:")
+        for warning in report["warnings"]:
+            print(f"- {warning}")
+    else:
+        print("No warnings detected.")
+
+
+def _prompt_decimal_sequence(prompt: str, allow_empty: bool = False) -> list[Decimal]:
+    while True:
+        raw = input(f"{prompt}: ").strip()
+        if not raw and allow_empty:
+            return []
+        try:
+            return [Decimal(piece.strip()) for piece in raw.split(",") if piece.strip()]
+        except InvalidOperation:
+            print("Please provide a comma-separated list of numbers.")
+
+
+def cmd_dialect_generate(args: argparse.Namespace) -> None:
+    """Interactively create a new dialect YAML template."""
+
+    output_path = Path(
+        args.output_path
+        or _prompt_str("Output path for new dialect", default="examples/dialect-new.yaml")
+    ).expanduser()
+    if output_path.exists() and not args.force and not _prompt_bool(
+        f"{output_path} exists. Overwrite?", default=False
+    ):
+        print("Aborted without writing a dialect.")
+        return
+
+    name = _prompt_str("Dialect name", default="custom")
+    description = _prompt_str(
+        "Dialect description",
+        default="Custom dialect created via enigmatic-dgb dialect generate",
+    )
+    symbol_name = _prompt_str("Primary symbol name", default="CUSTOM_SYMBOL")
+    symbol_description = _prompt_str(
+        "Primary symbol description", default="First symbol in the custom dialect"
+    )
+    anchors = _prompt_decimal_sequence("Value anchors (comma-separated, e.g., 21.21,7.00)")
+    micros = _prompt_decimal_sequence(
+        "Micro amounts (comma-separated, optional)", allow_empty=True
+    )
+    fee_punctuation = _coerce_decimal(
+        _prompt_str("Fee punctuation", default="0.21"), "fee punctuation"
+    )
+    inputs = int(_prompt_str("Cardinality - inputs (m)", default="21"))
+    outputs = int(_prompt_str("Cardinality - outputs (n)", default="21"))
+    block_delta = int(_prompt_str("Block-placement cadence Δh", default="3"))
+
+    dialect_body = {
+        "name": name,
+        "version": "0.1.0",
+        "description": description,
+        "fee_punctuation": float(fee_punctuation),
+        "symbols": {
+            symbol_name: {
+                "description": symbol_description,
+                "anchors": [float(value) for value in anchors],
+                "micros": [float(value) for value in micros],
+                "metadata": {
+                    "cardinality": {"inputs": inputs, "outputs": outputs},
+                    "block_delta": block_delta,
+                    "notes": "Edit anchors/micros/cardinality as your pattern evolves.",
+                },
+            }
+        },
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(yaml.safe_dump(dialect_body, sort_keys=False))
+    print(f"Wrote dialect template to {output_path}")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2749,6 +3022,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             console_main()
         elif args.command == "quickstart":
             cmd_quickstart(args)
+        elif args.command == "dialect":
+            if args.dialect_command == "list":
+                cmd_dialect_list(args)
+            elif args.dialect_command == "validate":
+                cmd_dialect_validate(args)
+            elif args.dialect_command == "generate":
+                cmd_dialect_generate(args)
+            else:  # pragma: no cover - argparse enforces choices
+                raise CLIError(f"Unknown dialect subcommand: {args.dialect_command}")
         elif args.command == "send-message":
             cmd_send_message(args)
         elif args.command == "watch":
