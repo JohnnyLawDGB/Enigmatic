@@ -30,8 +30,9 @@ with your working tree.
 ## 3. RPC & wallet configuration
 
 All planner, sender, and watcher commands share a single configuration surface.
-Set environment variables **once** or create `~/.enigmatic.yaml` so every
-subcommand can reuse the same connection details.
+Set environment variables **once** or create `~/.enigmatic/config.yaml` so every
+subcommand can reuse the same connection details (legacy `~/.enigmatic.yaml` is
+still supported).
 
 ```bash
 export DGB_RPC_USER="rpcuser"
@@ -41,7 +42,7 @@ export DGB_RPC_PORT="14022"
 export DGB_RPC_WALLET="enigmatic"
 ```
 
-Or use YAML (default path: `~/.enigmatic.yaml`):
+Or use YAML (default path: `~/.enigmatic/config.yaml`):
 
 ```yaml
 rpc:

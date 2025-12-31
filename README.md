@@ -55,8 +55,9 @@ pip install -e .[dev]
 export DGB_RPC_USER="rpcuser"
 export DGB_RPC_PASSWORD="rpcpass"
 
-# Or drop them into ~/.enigmatic.yaml to reuse across shells:
-cat <<'YAML' > ~/.enigmatic.yaml
+# Or drop them into ~/.enigmatic/config.yaml to reuse across shells:
+mkdir -p ~/.enigmatic
+cat <<'YAML' > ~/.enigmatic/config.yaml
 rpc:
   user: rpcuser
   password: rpcpass
@@ -125,7 +126,8 @@ All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
 
 Typical workflow: **dry-run → review state vector → broadcast**. Wallet and RPC
 credentials are shared across commands via environment variables or a single
-`~/.enigmatic.yaml` file (override with `--config`). Set them once and reuse
+`~/.enigmatic/config.yaml` file (override with `--config`). Legacy
+`~/.enigmatic.yaml` files are still read. Set credentials once and reuse
 every CLI subcommand. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for
 reproducible on-chain experiments.
 
