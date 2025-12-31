@@ -108,11 +108,46 @@ All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
 - **Free-form intents**: `enigmatic-dgb send-message`
 - **Observation and decoding**: `enigmatic-dgb watch`, `dtsp-*`,
   `binary-utxo-*`
+- **Ordinal inscriptions (Taproot + OP_RETURN)**: plan via
+  `enigmatic-dgb ord-plan-taproot`, sign/broadcast with
+  `enigmatic-dgb ord-inscribe`, or use the guided `enigmatic-dgb ord-wizard`
+  (also available inside the console).
 
 Typical workflow: **dry-run → review state vector → broadcast**. Wallet and RPC
 credentials are shared across commands via environment variables or CLI
 overrides. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for reproducible
 on-chain experiments.
+
+### Console + Taproot inscription workflow
+
+The ASCII console now ships a Taproot inscription wizard (menu option **[9]**)
+that mirrors the `enigmatic-dgb ord-wizard` CLI command. It stitches together
+payload validation, fee policy checks, and the inscription builder so you can
+stay inside a single guided flow.
+
+**Setup:**
+
+1. Export DigiByte RPC credentials (`DGB_RPC_USER`, `DGB_RPC_PASSWORD`,
+   `DGB_RPC_HOST`, `DGB_RPC_PORT`) and point to a wallet loaded with Taproot
+   keys. The wizard defaults to `taproot-lab`; you can override with
+   `--wallet` or `DGB_RPC_WALLET`.
+2. Create and fund a Taproot descriptor wallet before launching the console.
+   The lab guide shows the `digibyte-cli createwallet "taproot-lab" ...` and
+   `getnewaddress ... bech32m` steps plus funding tips and fee/bumpfee
+   troubleshooting.
+3. Start `enigmatic-dgb console`, choose **[9] Taproot inscription wizard**, and
+   follow the prompts.
+
+**Capabilities inside the wizard / `ord-wizard`:**
+
+- Accepts plain text, JSON (compacted automatically), hex, or file payloads and
+  surfaces envelope/push/script sizing to enforce the 520-byte limit.
+- Computes fee options with an adjustable sat/vB floor, suggests `max-fee-sats`
+  caps, and prints the signed transaction for review.
+- Dry-runs by default; broadcasting requires explicit confirmation (`BROADCAST`
+  in the console or `--broadcast` via CLI) and reuses the same funding plan.
+- Uses the Taproot Dialect v1 encoder/decoder (`enigmatic/taproot-v1`) so
+  on-chain payloads align with [`docs/taproot-dialect-v1.md`](docs/taproot-dialect-v1.md).
 
 ## History & Inspiration
 
