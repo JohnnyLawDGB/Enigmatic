@@ -49,7 +49,13 @@ class UTXOManager:
             for item in self.rpc.listunspent(min_confirmations)
         ]
         if not utxos:
-            raise RuntimeError("Wallet has no spendable UTXOs")
+            logger.warning(
+                "Wallet has no spendable UTXOs (min_confirmations=%s); fund or unlock the wallet.",
+                min_confirmations,
+            )
+            raise RuntimeError(
+                "Wallet has no spendable UTXOs. Fund or unlock the wallet and consider lowering --min-confirmations if you need to spend recent receipts."
+            )
 
         needed = target_amount + fee
         selected: List[UTXO] = []
@@ -62,8 +68,14 @@ class UTXOManager:
                 break
 
         if total < needed:
+            logger.warning(
+                "Insufficient funds for spend: needed=%.8f, available=%.8f (min_confirmations=%s)",
+                needed,
+                total,
+                min_confirmations,
+            )
             raise RuntimeError(
-                f"Insufficient funds: needed {needed}, selected {total}"
+                f"Insufficient funds: needed {needed}, selected {total}. Fund or unlock the wallet and consider lowering --min-confirmations."
             )
 
         change = total - target_amount - fee
@@ -206,8 +218,13 @@ class TransactionBuilder:
                 funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
             except RPCError as exc:
+                logger.error(
+                    "Wallet could not fund the inscription transaction via fundrawtransaction: %s",
+                    exc,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 raise RuntimeError(
-                    "Wallet could not fund the inscription transaction; add UTXOs or specify inputs"
+                    "Wallet could not fund the inscription transaction; add UTXOs, unlock the wallet, or specify --min-confirmations/inputs explicitly."
                 ) from exc
 
         signed = self.rpc.signrawtransactionwithwallet(raw_tx)

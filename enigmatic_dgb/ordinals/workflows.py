@@ -191,7 +191,7 @@ def prepare_inscription_transaction(
     if max_fee_sats is not None and computed_fee_sats > max_fee_sats:
         raise InscriptionFlowError(
             f"Computed fee {computed_fee_sats} sats exceeds max-fee-sats {max_fee_sats}; "
-            "increase the cap or lower the target feerate"
+            "reduce the payload size or increase --max-fee-sats to proceed."
         )
 
     result = PreparedInscription(
