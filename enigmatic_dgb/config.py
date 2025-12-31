@@ -15,7 +15,9 @@ class ConfigurationError(RuntimeError):
     """Raised when configuration is invalid."""
 
 
-DEFAULT_CONFIG_PATH = Path.home() / ".enigmatic.yaml"
+DEFAULT_CONFIG_DIR = Path.home() / ".enigmatic"
+DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.yaml"
+LEGACY_CONFIG_PATH = Path.home() / ".enigmatic.yaml"
 _CONFIG_PATH_OVERRIDE: Path | None = None
 
 
@@ -115,10 +117,21 @@ def load_rpc_config(
         else _CONFIG_PATH_OVERRIDE or DEFAULT_CONFIG_PATH
     )
 
-    file_config = _load_config_file(path, required=explicit_path)
+    file_config: dict[str, Any] = {}
+    loaded_path = path
+    config_candidates = [path]
+    if not explicit_path and LEGACY_CONFIG_PATH not in config_candidates:
+        config_candidates.append(LEGACY_CONFIG_PATH)
+
+    for candidate in config_candidates:
+        loaded_path = candidate
+        file_config = _load_config_file(candidate, required=explicit_path and candidate == path)
+        if file_config or candidate.exists():
+            break
+
     rpc_section = file_config.get("rpc", {}) if isinstance(file_config, dict) else {}
     if rpc_section and not isinstance(rpc_section, dict):
-        raise ConfigurationError(f"Expected 'rpc' to be a mapping in {path}")
+        raise ConfigurationError(f"Expected 'rpc' to be a mapping in {loaded_path}")
 
     override_map = dict(overrides or {})
 
@@ -157,7 +170,7 @@ def load_rpc_config(
         _coerce_port(override_map.get("port"), source="overrides"),
         _coerce_port(endpoint_port, source="endpoint"),
         env_port,
-        _coerce_port(rpc_section.get("port"), source=f"{path} rpc.port")
+        _coerce_port(rpc_section.get("port"), source=f"{loaded_path} rpc.port")
         if rpc_section.get("port") is not None
         else None,
         14022,
@@ -181,4 +194,3 @@ def load_rpc_config(
         use_https=bool(resolved_use_https),
         wallet=resolved_wallet,
     )
-

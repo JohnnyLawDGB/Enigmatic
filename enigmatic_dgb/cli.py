@@ -14,7 +14,10 @@ import base64
 import binascii
 import json
 import logging
+import shutil
+import subprocess
 import sys
+import textwrap
 from collections import defaultdict, OrderedDict
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +25,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
+import yaml
 from .binary_packets import (
     BinaryEncodingError,
     decode_binary_packets_to_text,
@@ -66,7 +70,14 @@ from .ordinals.workflows import (
     write_receipt,
 )
 from .ordinals.index_store import SQLiteOrdinalIndexStore
-from .config import ConfigurationError, load_rpc_config, set_default_config_path
+from .config import (
+    ConfigurationError,
+    DEFAULT_CONFIG_DIR,
+    DEFAULT_CONFIG_PATH,
+    LEGACY_CONFIG_PATH,
+    load_rpc_config,
+    set_default_config_path,
+)
 from .rpc_client import DigiByteRPC, RPCError, RPCTransportError, format_rpc_hint
 from .script_plane import ScriptPlane
 from .session import SessionContext
@@ -118,6 +129,306 @@ def _parse_decimal_list(raw: str) -> list[Decimal]:
     return decimals
 
 
+def _prompt_str(prompt: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        raw = input(f"{prompt}{suffix}: ").strip()
+        if raw:
+            return raw
+        if default is not None:
+            return default
+        print("Please provide a value.")
+
+
+def _prompt_bool(prompt: str, default: bool = False) -> bool:
+    suffix = " [Y/n]" if default else " [y/N]"
+    raw = input(f"{prompt}{suffix}: ").strip().lower()
+    if not raw:
+        return default
+    return raw in {"y", "yes", "1", "true"}
+
+
+def _digibyte_cli_available() -> bool:
+    return shutil.which("digibyte-cli") is not None
+
+
+def _load_existing_rpc_section() -> dict[str, Any]:
+    """Best-effort load of an existing RPC config for interactive defaults."""
+
+    for candidate in (DEFAULT_CONFIG_PATH, LEGACY_CONFIG_PATH):
+        if not candidate.exists():
+            continue
+        try:
+            loaded = yaml.safe_load(candidate.read_text()) or {}
+        except yaml.YAMLError:
+            continue
+        if isinstance(loaded, dict):
+            rpc_section = loaded.get("rpc", {})
+            if isinstance(rpc_section, dict):
+                return rpc_section
+    return {}
+
+
+def _write_rpc_config_file(rpc_config: dict[str, Any]) -> Path:
+    DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    body = {"rpc": rpc_config}
+    DEFAULT_CONFIG_PATH.write_text(yaml.safe_dump(body, sort_keys=False))
+    return DEFAULT_CONFIG_PATH
+
+
+def _run_digibyte_cli(
+    rpc_config: RPCConfig, args: list[str], *, wallet: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    if not _digibyte_cli_available():
+        raise CLIError("digibyte-cli is not available on PATH")
+    base = [
+        "digibyte-cli",
+        f"-rpcuser={rpc_config.user}",
+        f"-rpcpassword={rpc_config.password}",
+        f"-rpcconnect={rpc_config.host}",
+        f"-rpcport={rpc_config.port}",
+    ]
+    if wallet:
+        base.append(f"-rpcwallet={wallet}")
+    command = [*base, *args]
+    return subprocess.run(command, check=True, capture_output=True, text=True)
+
+
+def _check_python_prereq() -> None:
+    if sys.version_info < (3, 9):
+        raise CLIError(
+            "Python 3.9 or later is required. Please upgrade Python before continuing."
+        )
+
+
+def _probe_rpc_connectivity(rpc: DigiByteRPC) -> tuple[bool, str | None]:
+    try:
+        info = rpc.getblockchaininfo()
+    except Exception as exc:  # pragma: no cover - interactive probing
+        return False, str(exc)
+    chain = info.get("chain") if isinstance(info, dict) else None
+    blocks = info.get("blocks") if isinstance(info, dict) else None
+    return True, f"Connected to DigiByte node ({chain}, height {blocks})"
+
+
+def _offer_taproot_wallet_setup(rpc_config: RPCConfig) -> None:
+    if not _digibyte_cli_available():
+        print("digibyte-cli not found; skip Taproot wallet bootstrap.\n")
+        return
+
+    if not _prompt_bool(
+        f"Create a Taproot descriptor wallet now? (uses '{TAPROOT_WIZARD_DEFAULT_WALLET}')",
+        default=True,
+    ):
+        print("Skipping wallet creation.\n")
+        return
+
+    wallet_name = TAPROOT_WIZARD_DEFAULT_WALLET
+    try:
+        result = _run_digibyte_cli(
+            rpc_config,
+            ["createwallet", wallet_name, "false", "false", "", "true", "true", "true"],
+        )
+        if result.stdout:
+            print(result.stdout.strip())
+    except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+        print(f"createwallet failed: {exc.stderr or exc}")
+        return
+
+    try:
+        addr_proc = _run_digibyte_cli(
+            rpc_config, ["-rpcwallet", wallet_name, "getnewaddress", "", "bech32m"]
+        )
+        address = addr_proc.stdout.strip()
+        print(f"Taproot receive address for {wallet_name}: {address}")
+    except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+        print(f"Unable to obtain a Taproot address: {exc.stderr or exc}")
+        return
+
+    if _prompt_bool("Fund this wallet now from another loaded wallet?", default=False):
+        source_wallet = _prompt_str("Source wallet name")
+        amount = _prompt_str("Amount to send (DGB)", default="1.0")
+        try:
+            send_proc = _run_digibyte_cli(
+                rpc_config,
+                ["-rpcwallet", source_wallet, "sendtoaddress", address, amount],
+            )
+            txid = send_proc.stdout.strip()
+            print(f"Funding transaction broadcast: {txid}")
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+            print(f"Funding failed: {exc.stderr or exc}")
+    else:
+        print("You can fund the wallet later using digibyte-cli sendtoaddress.\n")
+
+
+def _prompt_rpc_credentials() -> dict[str, Any]:
+    existing = _load_existing_rpc_section()
+    print("\nRPC credentials (stored at ~/.enigmatic/config.yaml)")
+    user = _prompt_str("RPC username", default=existing.get("user"))
+    password = _prompt_str("RPC password", default=existing.get("password"))
+    host = _prompt_str("RPC host", default=existing.get("host", "127.0.0.1"))
+    while True:
+        port_raw = _prompt_str("RPC port", default=str(existing.get("port", 14022)))
+        try:
+            port = int(port_raw)
+            break
+        except ValueError:
+            print("Invalid port; please enter an integer.")
+    wallet = _prompt_str("Default wallet (optional)", default=existing.get("wallet", ""))
+    use_https = _prompt_bool("Use HTTPS?", default=bool(existing.get("use_https", False)))
+
+    rpc_config = {
+        "user": user,
+        "password": password,
+        "host": host,
+        "port": port,
+        "use_https": use_https,
+    }
+    if wallet:
+        rpc_config["wallet"] = wallet
+    return rpc_config
+
+
+def _run_cli_command(argv: list[str]) -> int:
+    try:
+        main(argv)
+    except SystemExit as exc:  # argparse.exit surfaces as SystemExit
+        return int(exc.code or 0)
+    return 0
+
+
+def _quickstart_menu(rpc_config: RPCConfig) -> None:
+    print(
+        textwrap.dedent(
+            """
+            Quickstart actions:
+            [1] Send a free-form Enigmatic message
+            [2] Plan or send a symbol from a dialect
+            [3] Watch an address for messages
+            [B] Exit
+            """
+        )
+    )
+    choice = input("Select an option: ").strip().lower()
+    if choice in {"b", "0"}:
+        return
+    if choice == "1":
+        to_address = _prompt_str("Destination address")
+        intent = _prompt_str("Intent (identity, sync, presence, etc.)", default="presence")
+        channel = _prompt_str("Channel", default="default")
+        payload = _prompt_str("Payload JSON (optional)", default="{}")
+        print("Running send-message as a dry run...")
+        dry_args = [
+            "send-message",
+            "--to-address",
+            to_address,
+            "--intent",
+            intent,
+            "--channel",
+            channel,
+            "--payload-json",
+            payload,
+            "--dry-run",
+        ]
+        _run_cli_command(dry_args)
+        if _prompt_bool("Broadcast this message now?", default=False):
+            _run_cli_command(
+                [
+                    "send-message",
+                    "--to-address",
+                    to_address,
+                    "--intent",
+                    intent,
+                    "--channel",
+                    channel,
+                    "--payload-json",
+                    payload,
+                ]
+            )
+    elif choice == "2":
+        dialect_path = _prompt_str(
+            "Dialect YAML path", default="examples/dialect-heartbeat.yaml"
+        )
+        symbol = _prompt_str("Symbol name")
+        to_address = _prompt_str("Destination address")
+        channel = _prompt_str("Channel", default="default")
+        print("Planning symbol with a dry run...")
+        dry_args = [
+            "send-symbol",
+            "--dialect-path",
+            dialect_path,
+            "--symbol",
+            symbol,
+            "--to-address",
+            to_address,
+            "--channel",
+            channel,
+            "--dry-run",
+        ]
+        _run_cli_command(dry_args)
+        if _prompt_bool("Broadcast this symbol now?", default=False):
+            _run_cli_command(
+                [
+                    "send-symbol",
+                    "--dialect-path",
+                    dialect_path,
+                    "--symbol",
+                    symbol,
+                    "--to-address",
+                    to_address,
+                    "--channel",
+                    channel,
+                ]
+            )
+    elif choice == "3":
+        address = _prompt_str("Address to watch")
+        poll_interval = _prompt_str("Poll interval (seconds)", default="30")
+        print("Checking watcher connectivity (--dry-run)...")
+        _run_cli_command(["watch", "--address", address, "--poll-interval", poll_interval, "--dry-run"])
+        if _prompt_bool("Start the watcher now? (Ctrl+C to stop)", default=False):
+            _run_cli_command(["watch", "--address", address, "--poll-interval", poll_interval])
+    else:
+        print("Unknown selection. Please try again.\n")
+    print()
+    _quickstart_menu(rpc_config)
+
+
+def cmd_quickstart(args: argparse.Namespace) -> None:
+    print(
+        textwrap.dedent(
+            """
+            Enigmatic Quickstart Wizard
+            --------------------------
+            This guided flow is ideal for beginners. It checks prerequisites, captures
+            RPC settings, and walks through common actions. Advanced users can still
+            invoke the granular enigmatic-dgb commands directly.
+            """
+        )
+    )
+
+    _check_python_prereq()
+    if not _digibyte_cli_available():
+        print("digibyte-cli not detected. Install DigiByte Core tools to unlock wallet helpers.")
+
+    rpc_values = _prompt_rpc_credentials()
+    config_path = _write_rpc_config_file(rpc_values)
+    print(f"RPC credentials saved to {config_path}")
+
+    rpc = _rpc_client()
+    ok, detail = _probe_rpc_connectivity(rpc)
+    if ok:
+        print(detail or "RPC connectivity looks good.\n")
+    else:
+        print("RPC connectivity failed. Start your node or fix credentials, then retry.")
+        if detail:
+            print(f"Details: {detail}")
+        if not _prompt_bool("Continue anyway?", default=False):
+            return
+
+    _offer_taproot_wallet_setup(rpc.config)
+    _quickstart_menu(rpc.config)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Enigmatic DigiByte CLI")
     parser.add_argument(
@@ -128,13 +439,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config",
-        help="Path to an Enigmatic YAML config (default: ~/.enigmatic.yaml). Overrides environment when provided.",
+        help=(
+            "Path to an Enigmatic YAML config (default: ~/.enigmatic/config.yaml; legacy ~/.enigmatic.yaml "
+            "is also read). Overrides environment when provided."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser(
         "console",
         help="Launch the interactive Enigmatic console (ASCII menu UI)",
+    )
+    subparsers.add_parser(
+        "quickstart",
+        help=(
+            "Interactive quickstart wizard for beginners (guides dependency checks, RPC config, "
+            "and first actions; advanced users can still call granular commands directly)"
+        ),
     )
 
     send_parser = subparsers.add_parser(
@@ -163,6 +484,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional shared secret used to encrypt the message payload",
     )
+    send_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the encoded outputs without broadcasting transactions",
+    )
 
     watch_parser = subparsers.add_parser(
         "watch", help="watch an address for Enigmatic packets"
@@ -173,6 +499,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="Polling cadence in seconds (default: 30)",
+    )
+    watch_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate RPC connectivity without starting the polling loop",
     )
 
     dtsp_encode_parser = subparsers.add_parser(
@@ -1331,11 +1662,28 @@ def cmd_send_message(args: argparse.Namespace) -> None:
     if not instructions:
         raise CLIError("Encoder returned no spend instructions")
 
-    builder = TransactionBuilder(rpc)
-    txids: list[str] = []
+    plans = []
     for chunk in _chunk_instructions(instructions, MAX_OUTPUTS_PER_TX):
         outputs, op_returns = _aggregate_outputs(chunk)
-        txid = builder.send_payment_tx(outputs, fee, op_return_data=op_returns)
+        plans.append({"outputs": outputs, "op_returns": op_returns})
+
+    if args.dry_run:
+        summary = {
+            "message_id": message.id,
+            "channel": args.channel,
+            "intent": args.intent,
+            "fee": f"{fee:.8f}",
+            "chunks": plans,
+        }
+        print(json.dumps(summary, indent=2))
+        return
+
+    builder = TransactionBuilder(rpc)
+    txids: list[str] = []
+    for chunk_plan in plans:
+        txid = builder.send_payment_tx(
+            chunk_plan["outputs"], fee, op_return_data=chunk_plan["op_returns"]
+        )
         txids.append(txid)
 
     result = {"message_id": message.id, "txids": txids}
@@ -1347,10 +1695,19 @@ def cmd_watch(args: argparse.Namespace) -> None:
     config = EncodingConfig.enigmatic_default()
     watcher = Watcher(
         rpc,
-        address=args.address,
+        addresses=args.address if isinstance(args.address, (list, tuple)) else [args.address],
         config=config,
         poll_interval_seconds=args.poll_interval,
     )
+
+    if getattr(args, "dry_run", False):
+        # Probe RPC connectivity and address access without entering the loop.
+        try:
+            rpc.getblockcount()
+        except Exception as exc:  # pragma: no cover - interactive probing
+            raise CLIError(f"RPC connectivity check failed: {exc}") from exc
+        print("RPC connectivity looks good; watcher is configured but not started.")
+        return
 
     def emit(message: EnigmaticMessage) -> None:
         data = {
@@ -2390,6 +2747,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             from .console import console_main
 
             console_main()
+        elif args.command == "quickstart":
+            cmd_quickstart(args)
         elif args.command == "send-message":
             cmd_send_message(args)
         elif args.command == "watch":

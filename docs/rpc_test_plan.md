@@ -4,7 +4,7 @@ This checklist describes integration tests that can be executed directly against
 
 ## 1. Dialect Planning Dry Run
 1. Ensure the automation dialect (e.g., `examples/dialect-heartbeat.yaml`) is up to date with the desired state planes.
-2. Export RPC credentials via `DGB_RPC_USER` / `DGB_RPC_PASSWORD` (or place them in `~/.enigmatic.yaml`). Use `--config <path>` to point at an alternate YAML file when testing multiple nodes.
+2. Export RPC credentials via `DGB_RPC_USER` / `DGB_RPC_PASSWORD` (or place them in `~/.enigmatic/config.yaml`; legacy `~/.enigmatic.yaml` still works). Use `--config <path>` to point at an alternate YAML file when testing multiple nodes.
 3. Run:
    ```bash
    enigmatic-dgb plan-symbol \
