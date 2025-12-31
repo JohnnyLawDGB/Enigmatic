@@ -6,21 +6,20 @@ from __future__ import annotations
 
 The helpers in this module back both the core Enigmatic encoding/decoding flows
 and the experimental ordinal/inscription explorers. Configuration is shared via
-environment variables so CLI commands and library callers reuse a consistent
+``load_rpc_config`` so CLI commands and library callers reuse a consistent
 connection surface. No consensus logic is implemented here; the client simply
 forwards well-typed requests and surfaces errors clearly.
 """
 
 import json
 import logging
-import os
 import uuid
-from dataclasses import dataclass
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
 
 import requests
 from requests import RequestException, Response
+
+from .config import ConfigurationError, RPCConfig, load_rpc_config
 
 logger = logging.getLogger(__name__)
 
@@ -78,110 +77,12 @@ def format_rpc_hint(error_obj: dict[str, Any] | RPCError | None) -> str | None:
     return None
 
 
-class ConfigurationError(RuntimeError):
-    """Raised when configuration is invalid."""
-
-
 class RPCTransportError(RuntimeError):
     """Raised when the RPC endpoint is unreachable or returns malformed data."""
 
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
-
-
-@dataclass
-class RPCConfig:
-    """Configuration container for DigiByte RPC connection details."""
-
-    user: str
-    password: str
-    host: str = "127.0.0.1"
-    port: int = 14022
-    use_https: bool = False
-    wallet: str | None = None
-
-    @property
-    def base_url(self) -> str:
-        scheme = "https" if self.use_https else "http"
-        return f"{scheme}://{self.host}:{self.port}"
-
-    @classmethod
-    def from_env(cls) -> "RPCConfig":
-        """Create configuration from standard DigiByte RPC environment variables."""
-
-        return cls.from_sources()
-
-    @classmethod
-    def from_sources(
-        cls,
-        *,
-        user: str | None = None,
-        password: str | None = None,
-        host: str | None = None,
-        port: int | None = None,
-        use_https: bool | None = None,
-        wallet: str | None = None,
-        endpoint: str | None = None,
-    ) -> "RPCConfig":
-        """Assemble a config from CLI overrides, environment, and dialect defaults."""
-
-        env = os.environ
-        resolved_user = user or env.get("ENIGMATIC_DGB_RPC_USER") or env.get("DGB_RPC_USER")
-        resolved_password = password or env.get("ENIGMATIC_DGB_RPC_PASSWORD") or env.get(
-            "DGB_RPC_PASSWORD"
-        )
-        if not resolved_user or not resolved_password:
-            raise ConfigurationError(
-                "RPC credentials must be provided via arguments or ENIGMATIC_DGB_RPC_*/DGB_RPC_* environment variables"
-            )
-
-        endpoint_host: str | None = None
-        endpoint_port: int | None = None
-        endpoint_https: bool | None = None
-        if endpoint:
-            parsed = urlparse(endpoint)
-            endpoint_host = parsed.hostname or None
-            endpoint_port = parsed.port or None
-            if parsed.scheme:
-                endpoint_https = parsed.scheme.lower() == "https"
-
-        env_host = env.get("ENIGMATIC_DGB_RPC_HOST") or env.get("DGB_RPC_HOST")
-        env_port_str = env.get("ENIGMATIC_DGB_RPC_PORT") or env.get("DGB_RPC_PORT")
-        env_port = None
-        if env_port_str:
-            try:
-                env_port = int(env_port_str)
-            except ValueError as exc:
-                raise ConfigurationError("DGB_RPC_PORT must be an integer") from exc
-        env_wallet = env.get("ENIGMATIC_DGB_RPC_WALLET") or env.get("DGB_RPC_WALLET")
-        env_https_raw = env.get("ENIGMATIC_DGB_RPC_USE_HTTPS") or env.get(
-            "DGB_RPC_USE_HTTPS"
-        )
-        env_https: bool | None = None
-        if env_https_raw is not None:
-            env_https = env_https_raw.lower() in {"1", "true", "yes"}
-
-        resolved_host = host or endpoint_host or env_host or "127.0.0.1"
-        resolved_port = port or endpoint_port or env_port or 14022
-        resolved_https = (
-            use_https
-            if use_https is not None
-            else (
-                endpoint_https
-                if endpoint_https is not None
-                else env_https if env_https is not None else False
-            )
-        )
-        resolved_wallet = wallet or env_wallet
-        return cls(
-            user=resolved_user,
-            password=resolved_password,
-            host=resolved_host,
-            port=resolved_port,
-            use_https=resolved_https,
-            wallet=resolved_wallet,
-        )
 
 
 class DigiByteRPCClient:
@@ -208,9 +109,9 @@ class DigiByteRPCClient:
 
     @classmethod
     def from_env(cls) -> "DigiByteRPCClient":
-        """Instantiate a client using environment variables."""
+        """Instantiate a client using environment variables or config file."""
 
-        return cls(RPCConfig.from_env())
+        return cls(load_rpc_config())
 
     def call(self, method: str, params: Optional[list[Any]] = None) -> Any:
         """Perform a JSON-RPC request."""
@@ -266,7 +167,7 @@ class DigiByteRPCClient:
             logger.error("RPC error body: %s", err_body)
             if response.status_code == 401:
                 raise RPCTransportError(
-                    "Unauthorized (401). Ensure ENIGMATIC_DGB_RPC_USER/DGB_RPC_USER and password are set, or pass --rpc-user/--rpc-password.",
+                    "Unauthorized (401). Ensure ENIGMATIC_DGB_RPC_USER/DGB_RPC_USER (or your .enigmatic.yaml) contains valid credentials.",
                     status_code=response.status_code,
                 )
         try:

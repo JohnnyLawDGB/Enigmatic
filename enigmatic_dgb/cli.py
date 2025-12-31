@@ -66,14 +66,8 @@ from .ordinals.workflows import (
     write_receipt,
 )
 from .ordinals.index_store import SQLiteOrdinalIndexStore
-from .rpc_client import (
-    ConfigurationError,
-    DigiByteRPC,
-    RPCConfig,
-    RPCError,
-    RPCTransportError,
-    format_rpc_hint,
-)
+from .config import ConfigurationError, load_rpc_config, set_default_config_path
+from .rpc_client import DigiByteRPC, RPCError, RPCTransportError, format_rpc_hint
 from .script_plane import ScriptPlane
 from .session import SessionContext
 from .symbol_sender import SessionRequiredError, prepare_symbol_send
@@ -108,6 +102,12 @@ class CLIError(RuntimeError):
     """Raised when CLI arguments are invalid."""
 
 
+def _rpc_client(overrides: dict[str, Any] | None = None) -> DigiByteRPC:
+    """Return an RPC client using shared config + optional overrides."""
+
+    return DigiByteRPC(load_rpc_config(overrides=overrides))
+
+
 def _parse_decimal_list(raw: str) -> list[Decimal]:
     try:
         decimals = [Decimal(piece.strip()) for piece in raw.split(",") if piece.strip()]
@@ -125,6 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug",
         action="store_true",
         help="Increase logging verbosity and include RPC call details",
+    )
+    parser.add_argument(
+        "--config",
+        help="Path to an Enigmatic YAML config (default: ~/.enigmatic.yaml). Overrides environment when provided.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -338,30 +342,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Limit the number of frames when planning a chained symbol",
     )
-    planner_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    planner_parser.add_argument("--rpc-host", help="Override RPC host")
-    planner_parser.add_argument(
-        "--rpc-port", type=int, help="Override RPC port (default from dialect)"
-    )
-    planner_parser.add_argument("--rpc-user", help="Override RPC username")
-    planner_parser.add_argument("--rpc-password", help="Override RPC password")
-    planner_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    https_group = planner_parser.add_mutually_exclusive_group()
-    https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    planner_parser.set_defaults(rpc_use_https=None)
 
     pattern_parser = subparsers.add_parser(
         "plan-pattern",
@@ -385,17 +365,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Broadcast the plan after inspection",
     )
-    pattern_parser.add_argument(
-        "--wallet-name",
-        "--rpc-wallet",
-        dest="rpc_wallet",
-        help="Override RPC wallet name",
-    )
-    pattern_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    pattern_parser.add_argument("--rpc-host", help="Override RPC host")
-    pattern_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    pattern_parser.add_argument("--rpc-user", help="Override RPC username")
-    pattern_parser.add_argument("--rpc-password", help="Override RPC password")
     pattern_parser.add_argument(
         "--min-confirmations",
         type=int,
@@ -424,22 +393,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=600.0,
         help="Maximum time to wait for confirmations before aborting (default: 600)",
     )
-    pattern_https_group = pattern_parser.add_mutually_exclusive_group()
-    pattern_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    pattern_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    pattern_parser.set_defaults(rpc_use_https=None)
 
     list_utxos_parser = subparsers.add_parser(
         "list-utxos",
@@ -461,33 +414,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit the raw listunspent JSON",
     )
-    list_utxos_parser.add_argument(
-        "--wallet-name",
-        "--rpc-wallet",
-        dest="rpc_wallet",
-        help="Override RPC wallet name",
-    )
-    list_utxos_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    list_utxos_parser.add_argument("--rpc-host", help="Override RPC host")
-    list_utxos_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    list_utxos_parser.add_argument("--rpc-user", help="Override RPC username")
-    list_utxos_parser.add_argument("--rpc-password", help="Override RPC password")
-    list_https_group = list_utxos_parser.add_mutually_exclusive_group()
-    list_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    list_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    list_utxos_parser.set_defaults(rpc_use_https=None)
 
     ord_scan_parser = subparsers.add_parser(
         "ord-scan",
@@ -551,28 +477,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit the scan results as JSON",
     )
-    ord_scan_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_scan_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_scan_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_scan_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_scan_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_scan_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    ord_scan_https_group = ord_scan_parser.add_mutually_exclusive_group()
-    ord_scan_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_scan_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_scan_parser.set_defaults(rpc_use_https=None)
 
     ord_index_parser = subparsers.add_parser(
         "ord-index",
@@ -652,29 +556,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit decoded payloads as JSON",
     )
-    ord_decode_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_decode_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_decode_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_decode_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_decode_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_decode_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    ord_decode_https_group = ord_decode_parser.add_mutually_exclusive_group()
-    ord_decode_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_decode_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_decode_parser.set_defaults(rpc_use_https=None)
-
     ord_plan_op_return_parser = subparsers.add_parser(
         "ord-plan-op-return",
         help="Draft a DigiByte OP_RETURN inscription plan (no broadcast)",
@@ -698,38 +579,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit the inscription plan as JSON",
     )
-    ord_plan_op_return_parser.add_argument(
-        "--rpc-url", help="Override RPC endpoint URL"
-    )
-    ord_plan_op_return_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_plan_op_return_parser.add_argument(
-        "--rpc-port", type=int, help="Override RPC port"
-    )
-    ord_plan_op_return_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_plan_op_return_parser.add_argument(
-        "--rpc-password", help="Override RPC password"
-    )
-    ord_plan_op_return_parser.add_argument(
-        "--rpc-wallet", help="Override RPC wallet name"
-    )
-    ord_plan_op_return_https_group = (
-        ord_plan_op_return_parser.add_mutually_exclusive_group()
-    )
-    ord_plan_op_return_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_plan_op_return_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_plan_op_return_parser.set_defaults(rpc_use_https=None)
 
     ord_plan_taproot_parser = subparsers.add_parser(
         "ord-plan-taproot",
@@ -755,34 +604,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit the inscription plan as JSON",
     )
-    ord_plan_taproot_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_plan_taproot_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_plan_taproot_parser.add_argument(
-        "--rpc-port", type=int, help="Override RPC port"
-    )
-    ord_plan_taproot_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_plan_taproot_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_plan_taproot_parser.add_argument(
-        "--rpc-wallet", help="Override RPC wallet name"
-    )
-    ord_plan_taproot_https_group = (
-        ord_plan_taproot_parser.add_mutually_exclusive_group()
-    )
-    ord_plan_taproot_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_plan_taproot_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_plan_taproot_parser.set_defaults(rpc_use_https=None)
 
     ord_inscribe_parser = subparsers.add_parser(
         "ord-inscribe",
@@ -872,33 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Minimum fee rate floor in sat/vB applied after estimation",
     )
-    ord_inscribe_parser.add_argument(
-        "--wallet-name",
-        "--rpc-wallet",
-        dest="rpc_wallet",
-        help="Override RPC wallet name for funding and signing",
-    )
-    ord_inscribe_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_inscribe_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_inscribe_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_inscribe_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_inscribe_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_inscribe_https_group = ord_inscribe_parser.add_mutually_exclusive_group()
-    ord_inscribe_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_inscribe_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_inscribe_parser.set_defaults(rpc_use_https=None, broadcast=False, rbf=True)
+    ord_inscribe_parser.set_defaults(broadcast=False, rbf=True)
     ord_wizard_parser = subparsers.add_parser(
         "ord-wizard",
         help="Guided Taproot inscription wizard (interactive or parameterized)",
@@ -949,23 +744,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="broadcast",
         help="Do not broadcast (review-only plan)",
     )
-    ord_wizard_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_wizard_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_wizard_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_wizard_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_wizard_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_wizard_parser.add_argument(
-        "--rpc-wallet",
-        help="Override RPC wallet name (default: taproot-lab unless --wallet provided)",
-    )
-    ord_wizard_https_group = ord_wizard_parser.add_mutually_exclusive_group()
-    ord_wizard_https_group.add_argument(
-        "--rpc-use-https", action="store_true", help="Force HTTPS for RPC"
-    )
-    ord_wizard_https_group.add_argument(
-        "--rpc-no-https", action="store_false", dest="rpc_use_https", help="Disable HTTPS for RPC"
-    )
-    ord_wizard_parser.set_defaults(rpc_use_https=None, broadcast=False)
+    ord_wizard_parser.set_defaults(broadcast=False)
 
     ord_mine_parser = subparsers.add_parser(
         "ord-mine",
@@ -1027,28 +806,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit discovered inscriptions as JSON",
     )
-    ord_mine_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    ord_mine_parser.add_argument("--rpc-host", help="Override RPC host")
-    ord_mine_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    ord_mine_parser.add_argument("--rpc-user", help="Override RPC username")
-    ord_mine_parser.add_argument("--rpc-password", help="Override RPC password")
-    ord_mine_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
-    ord_mine_https_group = ord_mine_parser.add_mutually_exclusive_group()
-    ord_mine_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    ord_mine_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    ord_mine_parser.set_defaults(rpc_use_https=None)
 
     chain_parser = subparsers.add_parser(
         "plan-chain",
@@ -1094,14 +851,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Broadcast the chained plan after inspection",
     )
-    chain_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    chain_parser.add_argument("--rpc-host", help="Override RPC host")
-    chain_parser.add_argument(
-        "--rpc-port", type=int, help="Override RPC port (default from dialect)"
-    )
-    chain_parser.add_argument("--rpc-user", help="Override RPC username")
-    chain_parser.add_argument("--rpc-password", help="Override RPC password")
-    chain_parser.add_argument("--rpc-wallet", help="Override RPC wallet name")
     chain_parser.add_argument(
         "--wait-between-txs",
         type=float,
@@ -1120,22 +869,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=600.0,
         help="Maximum time to wait for confirmations before aborting (default: 600)",
     )
-    chain_https_group = chain_parser.add_mutually_exclusive_group()
-    chain_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    chain_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    chain_parser.set_defaults(rpc_use_https=None)
 
     send_sequence_parser = subparsers.add_parser(
         "send-sequence",
@@ -1178,33 +911,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build the transaction without broadcasting",
     )
-    prepare_utxos_parser.add_argument(
-        "--wallet-name",
-        "--rpc-wallet",
-        dest="rpc_wallet",
-        help="Override RPC wallet name",
-    )
-    prepare_utxos_parser.add_argument("--rpc-url", help="Override RPC endpoint URL")
-    prepare_utxos_parser.add_argument("--rpc-host", help="Override RPC host")
-    prepare_utxos_parser.add_argument("--rpc-port", type=int, help="Override RPC port")
-    prepare_utxos_parser.add_argument("--rpc-user", help="Override RPC username")
-    prepare_utxos_parser.add_argument("--rpc-password", help="Override RPC password")
-    prepare_https_group = prepare_utxos_parser.add_mutually_exclusive_group()
-    prepare_https_group.add_argument(
-        "--rpc-use-https",
-        dest="rpc_use_https",
-        action="store_const",
-        const=True,
-        help="Force HTTPS when contacting the node",
-    )
-    prepare_https_group.add_argument(
-        "--rpc-use-http",
-        dest="rpc_use_https",
-        action="store_const",
-        const=False,
-        help="Force HTTP when contacting the node",
-    )
-    prepare_utxos_parser.set_defaults(rpc_use_https=None)
 
     return parser
 
@@ -1615,7 +1321,7 @@ def cmd_send_message(args: argparse.Namespace) -> None:
         payload=payload,
     )
 
-    rpc = DigiByteRPC.from_env()
+    rpc = _rpc_client()
     config = EncodingConfig.enigmatic_default()
     encoder = EnigmaticEncoder(config, target_address=args.to_address)
     instructions, fee = encoder.encode_message(
@@ -1637,7 +1343,7 @@ def cmd_send_message(args: argparse.Namespace) -> None:
 
 
 def cmd_watch(args: argparse.Namespace) -> None:
-    rpc = DigiByteRPC.from_env()
+    rpc = _rpc_client()
     config = EncodingConfig.enigmatic_default()
     watcher = Watcher(
         rpc,
@@ -1663,7 +1369,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
 def cmd_send_symbol(args: argparse.Namespace) -> None:
     extra_payload = _parse_payload_json(args.extra_payload_json)
     dialect = load_dialect(args.dialect_path)
-    rpc = DigiByteRPC.from_env()
+    rpc = _rpc_client()
     session: SessionContext | None = None
     if args.session_key_b64:
         if not args.session_id:
@@ -1720,36 +1426,8 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
     print(json.dumps({"txids": [txid]}, separators=COMPACT_JSON_SEPARATORS))
 
 
-def _rpc_from_automation_args(
-    args: argparse.Namespace, automation_endpoint: str, automation_wallet: str | None
-) -> DigiByteRPC:
-    config = RPCConfig.from_sources(
-        user=args.rpc_user,
-        password=args.rpc_password,
-        host=args.rpc_host,
-        port=args.rpc_port,
-        use_https=args.rpc_use_https,
-        wallet=args.rpc_wallet or automation_wallet,
-        endpoint=args.rpc_url or automation_endpoint,
-    )
-    return DigiByteRPC(config)
-
-
-def _rpc_from_pattern_args(args: argparse.Namespace) -> DigiByteRPC:
-    config = RPCConfig.from_sources(
-        user=args.rpc_user,
-        password=args.rpc_password,
-        host=args.rpc_host,
-        port=args.rpc_port,
-        use_https=args.rpc_use_https,
-        wallet=args.rpc_wallet,
-        endpoint=args.rpc_url,
-    )
-    return DigiByteRPC(config)
-
-
 def cmd_list_utxos(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     utxos = rpc.listunspent(args.min_confirmations)
     address_filter = None
     if getattr(args, "address", None):
@@ -1793,7 +1471,7 @@ def cmd_list_utxos(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_scan(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     config = OrdinalScanConfig(
         start_height=args.start_height,
         end_height=args.end_height,
@@ -1888,7 +1566,7 @@ def cmd_ord_index(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_mine(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     ownership_view = OrdinalOwnershipView(rpc)
     config = OrdinalScanConfig(
         start_height=args.start_height,
@@ -1968,7 +1646,7 @@ def cmd_ord_mine(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_decode(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     decoder = OrdinalInscriptionDecoder(rpc)
     logger.debug("ord-decode tx=%s vout=%s", args.txid, args.vout)
     payloads = decoder.decode_from_tx(args.txid)
@@ -2028,7 +1706,7 @@ def cmd_ord_decode(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_plan_op_return(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
 
     metadata_blob = None
     if args.metadata:
@@ -2068,7 +1746,7 @@ def cmd_ord_plan_op_return(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_plan_taproot(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
 
     planner = OrdinalInscriptionPlanner(
         rpc,
@@ -2121,7 +1799,7 @@ def cmd_ord_plan_taproot(args: argparse.Namespace) -> None:
 
 
 def cmd_ord_inscribe(args: argparse.Namespace) -> None:
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     builder = TransactionBuilder(rpc)
     planner = OrdinalInscriptionPlanner(rpc, tx_builder=builder)
 
@@ -2309,18 +1987,8 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
 
     payload_bytes, inferred_content_type = _resolve_wizard_payload(args)
     content_type = args.content_type or inferred_content_type
-
-    rpc = DigiByteRPC(
-        RPCConfig.from_sources(
-            user=args.rpc_user,
-            password=args.rpc_password,
-            host=args.rpc_host,
-            port=args.rpc_port,
-            use_https=args.rpc_use_https,
-            wallet=args.rpc_wallet or args.wallet or TAPROOT_WIZARD_DEFAULT_WALLET,
-            endpoint=args.rpc_url,
-        )
-    )
+    rpc_wallet = args.wallet or TAPROOT_WIZARD_DEFAULT_WALLET
+    rpc = _rpc_client({"wallet": rpc_wallet})
 
     try:
         stats = compute_taproot_envelope_stats(payload_bytes, content_type)
@@ -2379,7 +2047,7 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
             payload_bytes,
             content_type,
             {
-                "wallet": args.rpc_wallet or args.wallet or TAPROOT_WIZARD_DEFAULT_WALLET,
+                "wallet": rpc_wallet,
                 "fee_rate_sat_vb": prepared.fee_selection.fee_rate_sat_vb,
                 "max_fee_sats": recommended_cap,
                 "txid": prepared.txid,
@@ -2390,8 +2058,11 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
 
 def cmd_plan_symbol(args: argparse.Namespace) -> None:
     dialect = AutomationDialect.load(args.dialect_path)
-    rpc = _rpc_from_automation_args(
-        args, dialect.automation.endpoint, dialect.automation.wallet
+    rpc = _rpc_client(
+        {
+            "endpoint": dialect.automation.endpoint,
+            "wallet": dialect.automation.wallet,
+        }
     )
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
@@ -2422,7 +2093,7 @@ def cmd_plan_symbol(args: argparse.Namespace) -> None:
 def cmd_plan_pattern(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
@@ -2450,7 +2121,7 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
 def cmd_prepare_utxos(args: argparse.Namespace) -> None:
     amounts = _parse_amounts_csv(args.amounts)
     fee = _parse_decimal(args.fee, "--fee")
-    rpc = _rpc_from_pattern_args(args)
+    rpc = _rpc_client()
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
@@ -2493,8 +2164,11 @@ def cmd_plan_chain(args: argparse.Namespace) -> None:
     """Plan or broadcast a chained symbol defined in an automation dialect."""
 
     dialect = AutomationDialect.load(args.dialect_path)
-    rpc = _rpc_from_automation_args(
-        args, dialect.automation.endpoint, dialect.automation.wallet
+    rpc = _rpc_client(
+        {
+            "endpoint": dialect.automation.endpoint,
+            "wallet": dialect.automation.wallet,
+        }
     )
     planner = SymbolPlanner(rpc, dialect.automation)
     symbol = dialect.get_symbol(args.symbol)
@@ -2525,7 +2199,7 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
     op_returns = _parse_op_return_args(
         args.op_return_hex, args.op_return_ascii, len(amounts)
     )
-    rpc = DigiByteRPC.from_env()
+    rpc = _rpc_client()
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
@@ -2710,6 +2384,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     logging.getLogger().setLevel(
         logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
     )
+    set_default_config_path(getattr(args, "config", None))
     try:
         if args.command == "console":
             from .console import console_main

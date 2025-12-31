@@ -20,7 +20,7 @@ def test_fee_cap_recommendation():
 
 
 def test_rpc_auth_error_maps_to_hint():
-    config = RPCConfig.from_sources(user="user", password="pass")
+    config = RPCConfig(user="user", password="pass")
     client = DigiByteRPCClient(config)
     resp = Response()
     resp.status_code = 401

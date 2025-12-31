@@ -43,4 +43,4 @@ DigiByte transactions under Enigmatic.
   2. Map message primitives onto state transitions (e.g., `HEARTBEAT`, `CONSENSUS_PROOF`).
   3. Use wallet orchestration to select UTXOs that satisfy the requested cardinalities and symmetry constraints.
   4. Emit transactions and schedule them against the DigiByte node’s RPC interface, respecting the `Δh` schedule.
-- **RPC Integration:** Encoders must monitor `getblockcount` (or headers) to align block intervals and adjust fees dynamically. Future tooling will expose CLI flags like `enigmatic encode --dialect heartbeat --rpc http://...` to coordinate these steps.
+- **RPC Integration:** Encoders must monitor `getblockcount` (or headers) to align block intervals and adjust fees dynamically. Future tooling will reuse the shared RPC configuration surface (environment variables or `.enigmatic.yaml`) to coordinate these steps.

@@ -19,7 +19,8 @@ from typing import Callable, Iterable
 import numpy as np
 import pandas as pd
 
-from enigmatic_dgb.rpc_client import DigiByteRPC, RPCConfig
+from enigmatic_dgb.config import load_rpc_config
+from enigmatic_dgb.rpc_client import DigiByteRPC
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class TxRecord:
 def _rpc_from_env() -> DigiByteRPC:
     """Instantiate an RPC client using standard environment variables."""
 
-    return DigiByteRPC(RPCConfig.from_env())
+    return DigiByteRPC(load_rpc_config())
 
 
 def _resolve_height_range(
@@ -479,4 +480,3 @@ if __name__ == "__main__":
         start_time=START_TIME,
         end_time=END_TIME,
     )
-
