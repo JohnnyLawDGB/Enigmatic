@@ -2324,7 +2324,7 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     if args.max_fee_sats is not None and computed_fee_sats > args.max_fee_sats:
         raise CLIError(
             f"Computed fee {computed_fee_sats} sats exceeds max-fee-sats {args.max_fee_sats}; "
-            "increase --max-fee-sats or lower --fee-rate-satvb/--conf-target"
+            "reduce the payload size or increase --max-fee-sats to proceed."
         )
 
     logger.info(
@@ -3014,6 +3014,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     logging.getLogger().setLevel(
         logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
     )
+    if getattr(args, "verbose", False):
+        logger.debug("Verbose logging enabled; log level set to DEBUG")
     set_default_config_path(getattr(args, "config", None))
     try:
         if args.command == "console":
@@ -3090,6 +3092,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         BinaryEncodingError,
         DTSPEncodingError,
     ) as exc:
+        logger.error("Command failed: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG))
         parser.exit(1, f"error: {exc}\n")
 
 

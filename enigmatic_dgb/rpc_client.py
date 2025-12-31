@@ -63,6 +63,15 @@ def format_rpc_hint(error_obj: dict[str, Any] | RPCError | None) -> str | None:
             "  - Increase your wallet's paytxfee (settxfee) for the lab wallet\n"
             "  - Lower minrelaytxfee in digibyte.conf for a local test node"
         )
+    if code in {-4, -6} or "insufficient funds" in message.lower():
+        return (
+            "The wallet could not fund the transaction. Fund or unlock the wallet, and consider lowering "
+            "--min-confirmations if you want to spend recently received UTXOs."
+        )
+    if code == -13 or "wallet passphrase" in message.lower() or "wallet locked" in message.lower():
+        return (
+            "The wallet is locked. Unlock it with walletpassphrase (or via the GUI), then retry the command."
+        )
     if code == -8 and "key-value pair must contain exactly one key" in message:
         return (
             "createrawtransaction outputs are malformed. Each outputs entry must be an object with "
@@ -132,16 +141,23 @@ class DigiByteRPCClient:
                 timeout=30,
             )
         except RequestException as exc:
-            logger.debug("RPC connection failed: %s", exc, exc_info=True)
+            logger.error(
+                "RPC connection failed: %s",
+                exc,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
             raise RPCTransportError(
-                "RPC connection failed. Verify the node is reachable and credentials are correct."
+                "RPC connection failed. Ensure your DigiByte node is reachable, authentication is valid, "
+                "and DGB_RPC_* variables (or ~/.enigmatic.yaml) point to the right host and port."
             ) from exc
         try:
             self._raise_for_status(response)
         except requests.HTTPError as exc:
-            logger.debug("RPC HTTP error: %s", exc, exc_info=True)
+            logger.error(
+                "RPC HTTP error: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG)
+            )
             raise RPCTransportError(
-                "RPC server returned an HTTP error; check the URL, wallet path, and authentication.",
+                "RPC server returned an HTTP error; check the URL, wallet path, authentication, and DGB_RPC_* settings.",
                 status_code=response.status_code,
             ) from exc
         try:
