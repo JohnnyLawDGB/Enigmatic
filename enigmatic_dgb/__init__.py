@@ -54,6 +54,15 @@ from .ordinals import (
     encode_enig_taproot_payload,
     inspect_output_for_taproot,
 )
+from .unspendable import (
+    b58_dcmap,
+    b58_digits,
+    base58_check_encode,
+    base58_decode,
+    decode_address,
+    generate_address,
+    seeds,
+)
 
 __all__ = [
     "EnigmaticMessage",
@@ -103,4 +112,11 @@ __all__ = [
     "ENIG_TAPROOT_PROTOCOL",
     "TaprootScriptView",
     "inspect_output_for_taproot",
+    "base58_check_encode",
+    "base58_decode",
+    "b58_digits",
+    "b58_dcmap",
+    "decode_address",
+    "generate_address",
+    "seeds",
 ]
