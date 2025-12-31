@@ -626,6 +626,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Message to encode inside the unspendable address",
     )
 
+    unspendable_decode_parser = subparsers.add_parser(
+        "unspendable-decode",
+        help="Decode a human-readable unspendable address",
+        description="Recover the prefix and embedded message from an unspendable address.",
+    )
+    unspendable_decode_parser.add_argument("address", help="Address to decode")
+    unspendable_decode_parser.add_argument(
+        "--expect-prefix",
+        help="Optional expected prefix category (e.g., DAx, DBx, DCx); raises if the decoded prefix differs.",
+    )
+
     binary_encode_parser = subparsers.add_parser(
         "binary-utxo-encode",
         help="encode text into binary decimal UTXO packet amounts",
@@ -1701,6 +1712,23 @@ def cmd_unspendable(args: argparse.Namespace) -> None:
     address = unspendable.generate_address(args.prefix, args.message)
     print(address)
     print("Generated unspendable address (do not send funds).")
+
+
+def cmd_unspendable_decode(args: argparse.Namespace) -> None:
+    from . import unspendable
+
+    try:
+        prefix, message = unspendable.decode_address(args.address)
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
+
+    if args.expect_prefix and prefix != args.expect_prefix:
+        raise CLIError(
+            f"Decoded prefix '{prefix}' does not match expected '{args.expect_prefix}'."
+        )
+
+    print(f"Prefix: {prefix}")
+    print(f"Message: {message}")
 
 
 def cmd_binary_encode(args: argparse.Namespace) -> None:
@@ -3071,6 +3099,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_dtsp_table()
         elif args.command == "unspendable":
             cmd_unspendable(args)
+        elif args.command == "unspendable-decode":
+            cmd_unspendable_decode(args)
         elif args.command == "binary-utxo-encode":
             cmd_binary_encode(args)
         elif args.command == "binary-utxo-decode":
