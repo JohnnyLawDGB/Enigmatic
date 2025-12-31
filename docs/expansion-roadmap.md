@@ -7,18 +7,18 @@ the protocol, tooling, and documentation in lockstep.
 
 ## Near-term (reference stack hardening)
 
-- **Wallet/RPC ergonomics**: Expand dialect-level RPC overrides, add clearer
+- ✅ **Wallet/RPC ergonomics**: Expand dialect-level RPC overrides, add clearer
   error surfaces for missing wallets, and document hardware-wallet safe signing
   flows (`docs/TOOLING.md`).
-- **Planner fidelity**: Surface block-placement expectations in `plan-*`
+- ✅ **Planner fidelity**: Surface block-placement expectations in `plan-*`
   summaries, emit clearer change-linking visuals, and add regression tests for
   chained frame reuse (`tests/`).
-- **Dialect registry scaffolding**: Publish a canonical index in
+- ✅ **Dialect registry scaffolding**: Publish a canonical index in
   `examples/README.md`, plus linting for YAML structure and reserved plane
   markers (`specs/06-dialects.md`).
-- **Detection playbooks**: Extend `specs/05-decoding-process.md` with sliding
+- ✅ **Detection playbooks**: Extend `specs/05-decoding-process.md` with sliding
   window heuristics and add watcher examples that score fee bands and symmetry.
-- **Documentation parity**: Finalize whitepaper TODOs (timing diagrams,
+- ✅ **Documentation parity**: Finalize whitepaper TODOs (timing diagrams,
   orthogonality proof sketch) and keep README/tooling guides synchronized with
   the CLI surface.
 
@@ -33,6 +33,13 @@ the protocol, tooling, and documentation in lockstep.
   versioning, and automated `plan-symbol --dry-run` checks for submissions.
 - **Observability & analytics**: Dashboard-friendly watcher outputs, optional
   metrics exporters, and pattern detection frameworks for threat modeling.
+- **Wizard refinement**: Improve the CLI wizard flow with clearer prompts,
+  pre-flight checks, and actionable remediation steps.
+- **Hardware wallet integration**: Extend signer interfaces to support hardware
+  wallets as first-class, including capability discovery and failure recovery
+  guidance.
+- **Metrics exporters**: Expand observability by adding exporter modules (e.g.,
+  Prometheus) that expose planner and watcher health signals.
 - **Pattern detection research**: Formalize indistinguishability bounds for fee
   jitter and block cadence; publish detection-resistance benchmarks alongside
   example countermeasures.
