@@ -142,6 +142,36 @@ credentials are shared across commands via environment variables or a single
 every CLI subcommand. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for
 reproducible on-chain experiments.
 
+## Unspendable addresses
+
+Some Enigmatic flows embed short, human-readable notes in **unspendable
+addresses** rather than the main state planes. These vanity strings use the
+upstream MacDougal character mapping preserved in
+`enigmatic_dgb/unspendable.py`, and the CLI exposes a static mapping by
+default. You can fork or wrap that mapping to introduce your own character set
+when composing alternate metadata channels.
+
+- **Prefix categories**: `DAx` (person), `DBx` (transport mechanism), `DCx`
+  (subject), `DDx` / `DEx` (half IPFS hash). The prefix determines the version
+  byte and how observers classify the embedded text.
+- **Usage constraints**: These addresses are intentionally unspendable and are
+  only for metadata or routing hints; never fund them with coins.
+- **Protocol guidance**: Use unspendable addresses when you want to surface a
+  subject line, reference a person’s name, or point at an external hash without
+  consuming value/fee/cardinality slots in the state-plane encoding.
+
+### Example: generate a subject vanity address
+
+```bash
+enigmatic-dgb unspendable DCx "THiSxiSxTHExSTUFF"
+# → DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo
+```
+
+The command pads the message to the required length, applies the MacDougal
+mapping, and encodes the result with a Base58Check checksum to create an
+address-like string that peers can route or index while recognizing it cannot
+be spent.
+
 ### Console + Taproot inscription workflow
 
 The ASCII console now ships a Taproot inscription wizard (menu option **[9]**)
