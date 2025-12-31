@@ -150,17 +150,34 @@ enigmatic-dgb send-message \
 
 ## 6. Creating or extending dialects
 
-1. Copy an existing dialect (e.g., `examples/dialect-heartbeat.yaml`).
-2. Define symbols and, if needed, multi-frame chains. Specify value anchors,
-   fee punctuation, cardinality, topology hints, block-placement cadence, and
-   optional OP_RETURN selectors.
-3. Use `enigmatic-dgb plan-symbol --dialect-path <file> --symbol <NAME> --dry-run`
-   to validate constraints and dust compliance.
-4. Iterate until the planned state vector matches the intended symbol, then
-   broadcast with `--broadcast` or incorporate into automation.
+Use the dedicated dialect helpers instead of hand-editing YAML:
 
-Keep dialect files close to their replay instructions inside `examples/README.md`
-so observers can reproduce them with the same CLI flags.
+```bash
+# Discover built-in examples and any custom directories you pass
+enigmatic-dgb dialect list --dialect-dir ~/enigmatic-dialects
+
+# Lint structure and reserved plane markers (FRAME_SYNC, HEARTBEAT, CONSENSUS_PROOF)
+enigmatic-dgb dialect validate examples/dialect-heartbeat.yaml
+
+# Scaffold a new dialect interactively
+enigmatic-dgb dialect generate --output-path ~/enigmatic-dialects/dialect-custom.yaml
+```
+
+The generator collects value anchors, fee punctuation, cardinality, and
+block-placement cadence and writes a ready-to-edit YAML template. After
+tweaking anchors or metadata, dry-run with `plan-symbol` to confirm your
+state vector:
+
+```bash
+enigmatic-dgb plan-symbol \
+  --dialect-path ~/enigmatic-dialects/dialect-custom.yaml \
+  --symbol CUSTOM_SYMBOL \
+  --dry-run
+```
+
+Keep dialect files close to their replay instructions inside
+`examples/README.md` (or your own directory index) so observers can reproduce
+them with the same CLI flags.
 
 ## 7. Decoding patterns and watching addresses
 
