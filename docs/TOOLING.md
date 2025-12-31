@@ -68,6 +68,7 @@ transaction builder can sign each frame.
 | `plan-pattern` | Plan/broadcast an explicit list of amounts (value-plane only). |
 | `send-sequence` / `plan-sequence` | Chained explicit sequences with optional OP_RETURN hints. |
 | `watch` | Observe an address and stream decoded packets. |
+| `unspendable` | Generate a human-readable unspendable vanity address. |
 | `ord-scan` | Scan a block range for OP_RETURN and Taproot-style inscription candidates (experimental). |
 | `ord-index` | Query the local inscription cache built via `ord-scan --update-index`. |
 | `ord-decode` | Decode inscription-style payloads from a transaction (experimental). |
@@ -136,6 +137,14 @@ enigmatic-dgb send-sequence \
   --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
   --amounts 73,61,47,37,23,13,5 \
   --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
+
+```
+
+### Example: generate an unspendable vanity address
+
+```bash
+enigmatic-dgb unspendable DCx "THiSxiSxTHExSTUFF"
+# → DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo
 ```
 
 ### Example: free-form message

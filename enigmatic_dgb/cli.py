@@ -608,6 +608,24 @@ def build_parser() -> argparse.ArgumentParser:
         "dtsp-table", help="print the DTSP substitution and handshake table"
     )
 
+    unspendable_parser = subparsers.add_parser(
+        "unspendable",
+        help="Generate a human-readable unspendable address",
+        description=(
+            "Create an intentionally unspendable vanity address using the DiMECASH/Base58 mapping.\n"
+            "Example: enigmatic unspendable DCx \"THiSxiSxTHExSTUFF\" -> "
+            "DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo"
+        ),
+    )
+    unspendable_parser.add_argument(
+        "prefix",
+        help="Prefix to seed the version byte (e.g., DAx, DBx, DCx)",
+    )
+    unspendable_parser.add_argument(
+        "message",
+        help="Message to encode inside the unspendable address",
+    )
+
     binary_encode_parser = subparsers.add_parser(
         "binary-utxo-encode",
         help="encode text into binary decimal UTXO packet amounts",
@@ -1675,6 +1693,14 @@ def cmd_dtsp_decode(args: argparse.Namespace) -> None:
 
 def cmd_dtsp_table() -> None:
     print(format_dtsp_table())
+
+
+def cmd_unspendable(args: argparse.Namespace) -> None:
+    from . import unspendable
+
+    address = unspendable.generate_address(args.prefix, args.message)
+    print(address)
+    print("Generated unspendable address (do not send funds).")
 
 
 def cmd_binary_encode(args: argparse.Namespace) -> None:
@@ -3043,6 +3069,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_dtsp_decode(args)
         elif args.command == "dtsp-table":
             cmd_dtsp_table()
+        elif args.command == "unspendable":
+            cmd_unspendable(args)
         elif args.command == "binary-utxo-encode":
             cmd_binary_encode(args)
         elif args.command == "binary-utxo-decode":
