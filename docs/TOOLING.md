@@ -30,7 +30,8 @@ with your working tree.
 ## 3. RPC & wallet configuration
 
 All planner, sender, and watcher commands share a single configuration surface.
-Set environment variables to avoid repeating flags:
+Set environment variables **once** or create `~/.enigmatic.yaml` so every
+subcommand can reuse the same connection details.
 
 ```bash
 export DGB_RPC_USER="rpcuser"
@@ -40,9 +41,20 @@ export DGB_RPC_PORT="14022"
 export DGB_RPC_WALLET="enigmatic"
 ```
 
-Override any field per command with `--rpc-host`, `--rpc-port`, `--rpc-user`,
-`--rpc-password`, `--rpc-wallet`, or `--rpc-url`. Load and unlock the target
-wallet before broadcasting so the transaction builder can sign each frame.
+Or use YAML (default path: `~/.enigmatic.yaml`):
+
+```yaml
+rpc:
+  user: rpcuser
+  password: rpcpass
+  host: 127.0.0.1
+  port: 14022
+  wallet: enigmatic
+```
+
+Pass `--config /path/to/alt.yaml` to any `enigmatic-dgb` command to swap
+profiles. Load and unlock the target wallet before broadcasting so the
+transaction builder can sign each frame.
 
 ## 4. Command surface
 
@@ -243,8 +255,8 @@ double-check the payload and fee.
 
 ## 8. Integrating wallets & RPC setups
 
-- For **mainnet/testnet switching**, override `--rpc-port` and `--rpc-wallet`
-  per command while reusing the same dialect file.
+- For **mainnet/testnet switching**, swap config files via `--config` (e.g.
+  `~/.enigmatic.testnet.yaml`) while reusing the same dialect file.
 - For **air-gapped signing**, use `plan-*` commands to export the planned inputs
   and outputs, sign offline via DigiByte Core, then broadcast with
   `sendrawtransaction`.

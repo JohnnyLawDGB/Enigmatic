@@ -51,15 +51,25 @@ cd Enigmatic
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 
-# Export DigiByte RPC credentials used by the CLI
+# Export DigiByte RPC credentials used by the CLI (one-time per shell)
 export DGB_RPC_USER="rpcuser"
 export DGB_RPC_PASSWORD="rpcpass"
+
+# Or drop them into ~/.enigmatic.yaml to reuse across shells:
+cat <<'YAML' > ~/.enigmatic.yaml
+rpc:
+  user: rpcuser
+  password: rpcpass
+  host: 127.0.0.1
+  port: 14022
+  wallet: taproot-lab
+YAML
 
 # Start with the ASCII console to explore tools and menus
 enigmatic-dgb console
 
-# Verify the CLI is available outside the console
-enigmatic-dgb --help
+# Verify the CLI is available outside the console (use --config for alternate YAML)
+enigmatic-dgb --config ./devnet.yaml --help
 
 # Run unit tests (optional for docs-only edits)
 pytest
@@ -114,9 +124,10 @@ All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
   (also available inside the console).
 
 Typical workflow: **dry-run → review state vector → broadcast**. Wallet and RPC
-credentials are shared across commands via environment variables or CLI
-overrides. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for reproducible
-on-chain experiments.
+credentials are shared across commands via environment variables or a single
+`~/.enigmatic.yaml` file (override with `--config`). Set them once and reuse
+every CLI subcommand. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for
+reproducible on-chain experiments.
 
 ### Console + Taproot inscription workflow
 

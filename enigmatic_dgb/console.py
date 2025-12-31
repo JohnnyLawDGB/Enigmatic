@@ -1308,7 +1308,7 @@ def handle_taproot_wizard() -> None:
         message = str(exc)
         if isinstance(exc, RPCTransportError) and exc.status_code == 401:
             print(
-                "Unauthorized: set DGB_RPC_USER/DGB_RPC_PASSWORD or pass --rpc-user/--rpc-password"
+                "Unauthorized: set DGB_RPC_USER/DGB_RPC_PASSWORD or populate ~/.enigmatic.yaml"
             )
         print(message)
         _pause()
