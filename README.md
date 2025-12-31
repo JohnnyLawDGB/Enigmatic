@@ -21,6 +21,13 @@ Read this README for a high-level tour, then jump to
 [`docs/TOOLING.md`](docs/TOOLING.md) for CLI workflows or
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for module-level detail.
 
+## Start here
+
+- New users: follow the condensed [Simple Usage Guide](docs/simple_usage.md) for
+  a dry-run → broadcast workflow, dialect basics, and common commands.
+- See [`docs/TOOLING.md`](docs/TOOLING.md) for the full CLI matrix and advanced
+  helpers.
+
 ## DigiByte Taproot Lab Guide
 
 - Step-by-step walkthrough from a fresh DigiByte Core node to your first
