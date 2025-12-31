@@ -126,6 +126,8 @@ All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
   `enigmatic-dgb prepare-utxos` plus `--use-utxos` flags to carve and reuse
   wallet-owned inputs for later signaling
 - **Free-form intents**: `enigmatic-dgb send-message`
+- **Unspendable vanity addresses**: `enigmatic-dgb unspendable DCx "THiSxiSxTHExSTUFF"`
+  → `DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo`
 - **Observation and decoding**: `enigmatic-dgb watch`, `dtsp-*`,
   `binary-utxo-*`
 - **Ordinal inscriptions (Taproot + OP_RETURN)**: plan via
