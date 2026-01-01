@@ -1539,7 +1539,7 @@ def handle_taproot_wizard() -> None:
         },
     )
     print(f"Receipt saved to {receipt_path}")
-    _pause()\n*** End Patch
+    _pause()
 
 
 if __name__ == "__main__":
