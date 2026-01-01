@@ -1,70 +1,213 @@
-# Enigmatic — DigiByte Layer-0 Communication Stack
+# Enigmatic — DigiByte Layer-0 Communication Protocol
 
-Enigmatic is a **Layer-0 communication protocol** that uses DigiByte’s native
-UTXO, fee, and transaction topology space as a multi-plane message channel.
-Each transaction expresses a **state vector** across value, fee, cardinality,
-topology, and block-placement planes so peers can interpret intent without
-adding new opcodes or consensus rules.
+**Enigmatic** is a Layer-0 steganographic communication protocol that encodes messages in DigiByte's native UTXO patterns. Instead of adding new opcodes or consensus rules, it uses the existing transaction structure—amounts, fees, input/output counts, topology, and timing—as a multi-dimensional message channel. Each transaction expresses a **state vector** that peers can interpret without on-chain metadata.
 
-The repository ships four aligned pillars:
+Named after the WWII Enigma cipher machine, the protocol brings structured cryptographic signaling to the blockchain era, honoring the codebreakers of Bletchley Park while pioneering modern steganography on a permissionless ledger.
 
-- **Specifications** (`specs/01-*.md`) – formalizes state planes, encoding and
-  decoding functions, and dialect composition.
-- **Whitepaper draft** (`docs/whitepaper.md`) – narrative that mirrors the spec
-  and current implementation.
-- **Python reference stack** (`enigmatic_dgb/`) – encoder, decoder, planner,
-  transaction builder, RPC client, and the `enigmatic-dgb` CLI.
-- **Examples & tests** (`examples/`, `tests/`) – reproducible dialects,
-  decoded walkthroughs, and pytest coverage.
+---
 
-Read this README for a high-level tour, then jump to
-[`docs/TOOLING.md`](docs/TOOLING.md) for CLI workflows or
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for module-level detail.
+## 🚀 Quick Start (30 seconds)
 
-## Start here
-
-- New users: follow the condensed [Simple Usage Guide](docs/simple_usage.md) for
-  a dry-run → broadcast workflow, dialect basics, and common commands.
-- See [`docs/TOOLING.md`](docs/TOOLING.md) for the full CLI matrix and advanced
-  helpers.
-
-## DigiByte Taproot Lab Guide
-
-- Step-by-step walkthrough from a fresh DigiByte Core node to your first
-  Taproot inscription, including real-world pitfalls and RPC error hints:
-  [`docs/taproot_inscription_lab.md`](docs/taproot_inscription_lab.md).
-
-## State Planes & Terminology
-
-| Plane | Conveys | Example usage | Specification |
-| ----- | ------- | ------------- | ------------- |
-| **Value** | Amount anchors and repetition headers | `21.21` / `7.00` alternating beacons | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
-| **Fee** | Timing offsets and jitter bands | `0.21` cadence to punctuate frames | [`specs/02-encoding-primitives.md`](specs/02-encoding-primitives.md) |
-| **Cardinality** | Input/output counts and symmetry | `21 in / 21 out` mirrored swarms | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
-| **Topology** | Output graph motifs and ordering windows | Fan-out trees, ring confirmations | [`specs/03-formal-model.md`](specs/03-formal-model.md) |
-| **Block placement** | Height deltas and repetition | `Δheight = 3` heartbeat scheduling | [`specs/04-encoding-process.md`](specs/04-encoding-process.md), [`specs/05-decoding-process.md`](specs/05-decoding-process.md) |
-| **Auxiliary (OP_RETURN / metadata)** | Optional hints | Hash commitments, dialect selectors | [`specs/01-protocol-overview.md`](specs/01-protocol-overview.md) |
-
-**State vector**: a single transaction’s coordinates across the planes above.
-**Dialect**: a named ruleset mapping **symbols** (semantic intents) to state
-vectors. Multi-transaction symbols are expressed as **frames** in a chain. The
-specs keep these terms consistent for both implementers and analysts.
-
-## Quickstart
+**The easiest way to start:**
 
 ```bash
 git clone https://github.com/JohnnyLawDGB/Enigmatic.git
 cd Enigmatic
-python -m venv .venv && source .venv/bin/activate
-pip install -e .[dev]
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 
-# Export DigiByte RPC credentials used by the CLI (one-time per shell)
+# Launch the console (handles RPC credentials for you)
+./console
+```
+
+The `./console` launcher will:
+1. Prompt for your DigiByte RPC credentials (one-time setup)
+2. Optionally save them to `~/.enigmatic.yaml`
+3. Display the beautiful WWII Enigma-themed splash screen
+4. Launch the interactive menu
+
+**First time?** See [`CONSOLE_LAUNCHER.md`](CONSOLE_LAUNCHER.md) for details.
+
+---
+
+## ✨ What Can You Do?
+
+**Interactive Console** (Menu-driven, beginner-friendly):
+- **[1-5]** Send steganographic patterns (symbols, sequences, chains)
+- **[6-7]** Decode and watch on-chain activity
+- **[8]** Prime ladder experiments
+- **[9]** Taproot inscription wizard (with proper BIP341 commitments!)
+- **[10]** Generate/decode unspendable vanity addresses
+
+**Command-Line Interface** (Power users):
+- Plan/send dialect-driven symbols: `enigmatic-dgb plan-symbol`, `send-symbol`
+- Create Taproot inscriptions: `enigmatic-dgb ord-wizard`, `ord-inscribe`
+- DTSP fee-plane messaging: `enigmatic-dgb dtsp-encode`, `dtsp-send`
+- Generate unspendable addresses: `enigmatic-dgb unspendable DCx "MESSAGE"`
+- Watch and decode: `enigmatic-dgb watch`, `ord-decode`
+
+---
+
+## 🎯 Core Concepts
+
+### State Planes
+
+Enigmatic encodes meaning across 6 dimensions of every transaction:
+
+| Plane | What It Encodes | Example |
+|-------|----------------|---------|
+| **Value** | Amount anchors, headers | `21.21` DGB beacon |
+| **Fee** | Timing, jitter bands | `0.21` DGB cadence |
+| **Cardinality** | Input/output counts | `21 in / 21 out` symmetry |
+| **Topology** | Output graph patterns | Fan-out trees, rings |
+| **Block Placement** | Height deltas, repetition | `Δheight = 3` heartbeat |
+| **Auxiliary** | Optional hints | OP_RETURN metadata |
+
+### Dialects
+
+A **dialect** maps human-readable **symbols** (like `HEARTBEAT` or `GENESIS`) to specific state vector patterns. Multi-transaction symbols become **frames** in a sequence. This keeps recurring intents consistent and decodable.
+
+**Example:** The `dialect-showcase.yaml` includes symbols like:
+- `genesis_bitcoin_2009` - Tribute to Bitcoin's genesis block
+- `triptych_21_21_84` - DigiByte's sacred numbers
+- `digishield_pulse` - References DigiShield difficulty adjustment
+- `hello_enigmatic` - Simple greeting pattern
+
+---
+
+## 📚 Quick Examples
+
+### 1. Send a Simple Pattern (Console)
+```bash
+./console
+# Select [1] Quickstart
+# Follow prompts to send value/fee patterns
+```
+
+### 2. Create a Taproot Inscription (Console)
+```bash
+./console
+# Select [9] Taproot inscription wizard
+# Choose payload type (text, JSON, hex)
+# Review fees and broadcast
+```
+
+### 3. Generate an Unspendable Vanity Address (CLI)
+```bash
+enigmatic-dgb unspendable DCx "HAPPY2026"
+# Output: DCxHAPPY2c26zzzzzzzzzzzzzzzzWnppyp
+```
+
+### 4. Send a Dialect Symbol (CLI)
+```bash
+enigmatic-dgb send-symbol \
+  --dialect-path examples/dialect-heartbeat.yaml \
+  --symbol HEARTBEAT \
+  --to-address dgb1q... \
+  --dry-run  # Review first!
+```
+
+### 5. Watch for On-Chain Activity (CLI)
+```bash
+enigmatic-dgb watch \
+  --address dgb1q... \
+  --start-height 22700000 \
+  --limit 100
+```
+
+---
+
+## 📖 Documentation
+
+**New Users:**
+- 🎮 Start with the **interactive console**: `./console`
+- 📘 Read the [Simple Usage Guide](docs/simple_usage.md) for CLI basics
+- 🧪 Try the [Taproot Inscription Lab](docs/taproot_inscription_lab.md) for step-by-step inscriptions
+
+**Developers:**
+- 🏗️ [Architecture Overview](docs/ARCHITECTURE.md) - Module design and code structure
+- 🛠️ [Tooling Guide](docs/TOOLING.md) - Complete CLI command reference
+- 📜 [Protocol Specifications](specs/) - Formal encoding/decoding rules
+
+**Reference:**
+- 📄 [Whitepaper](docs/whitepaper.md) - Full protocol narrative
+- 🗺️ [Roadmap](docs/expansion-roadmap.md) - Future development priorities
+- 🔒 [Security Model](specs/06-security-model.md) - Threat assumptions and deniability
+
+---
+
+## 🗂️ Repository Structure
+
+```
+Enigmatic/
+├── enigmatic_dgb/       # Python implementation
+│   ├── cli.py          # Command-line interface
+│   ├── console.py      # Interactive menu system
+│   ├── encoder.py      # State vector encoding
+│   ├── decoder.py      # Message decoding
+│   ├── planner.py      # UTXO selection & planning
+│   ├── ordinals/       # Taproot inscription tools
+│   └── ...
+├── specs/              # Protocol specifications
+├── docs/               # Documentation and guides
+├── examples/           # Sample dialects and walkthroughs
+├── tests/              # Pytest test suite
+└── console             # Launcher script ⭐
+```
+
+---
+
+## 🎨 Features Highlight
+
+### Beautiful ASCII Splash Screen
+The console greets you with a WWII Enigma machine tribute:
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║   ███████╗███╗   ██╗██╗ ██████╗ ███╗   ███╗ █████╗ ████████╗██╗ ██████╗ ║
+║   [●] [●] [●]  Rotor Assembly: UTXO Pattern Encoding  [●] [●] [●]         ║
+║   Q  W  E  R  T  Y  U  I  O  P     Plugboard: Address Mapping             ║
+║   "In memory of Alan Turing and the codebreakers of Bletchley Park"       ║
+║    Modern steganography meets WWII cryptographic heritage 1939-2026       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+```
+
+### Proper BIP341 Taproot Inscriptions
+Recent improvements ensure Taproot inscriptions **actually work**:
+- ✅ Full BIP341 implementation with tagged hashing
+- ✅ Proper key tweaking and merkle root computation
+- ✅ Deterministic P2TR addresses from inscription scripts
+- ✅ Clean UX with suppressed error logs during verification
+
+See [Taproot Inscription Fix Summary](docs/taproot_inscription_fix_summary.md) for technical details.
+
+### Unspendable Vanity Addresses
+Create human-readable on-chain markers using DiMECASH character mapping:
+- `DAx` prefix = Person names
+- `DBx` prefix = Transport mechanism
+- `DCx` prefix = Subject/topic
+- `DDx/DEx` prefix = Hash references
+
+⚠️ **Warning:** These addresses are **provably unspendable** - never send funds to them!
+
+---
+
+## 🧑‍💻 Advanced Usage
+
+<details>
+<summary><b>Manual RPC Configuration (click to expand)</b></summary>
+
+If you prefer not to use the `./console` launcher, export credentials manually:
+
+```bash
 export DGB_RPC_USER="rpcuser"
 export DGB_RPC_PASSWORD="rpcpass"
+export DGB_RPC_HOST="127.0.0.1"
+export DGB_RPC_PORT="14022"
+export DGB_RPC_WALLET="taproot-lab"
 
-# Or drop them into ~/.enigmatic/config.yaml to reuse across shells:
+# Or create ~/.enigmatic.yaml:
 mkdir -p ~/.enigmatic
-cat <<'YAML' > ~/.enigmatic/config.yaml
+cat <<'YAML' > ~/.enigmatic.yaml
 rpc:
   user: rpcuser
   password: rpcpass
@@ -73,204 +216,122 @@ rpc:
   wallet: taproot-lab
 YAML
 
-# Start with the ASCII console to explore tools and menus
+# Then use CLI directly:
 enigmatic-dgb console
-
-# Verify the CLI is available outside the console (use --config for alternate YAML)
-enigmatic-dgb --config ./devnet.yaml --help
-
-# Run unit tests (optional for docs-only edits)
-pytest
 ```
 
-### Single-command bootstrap (prompts for RPC creds)
+</details>
 
-To skip the manual setup steps above, source the helper script once per shell
-session. It will create or reuse `.venv`, install editable dependencies, and
-prompt for `DGB_RPC_USER`/`DGB_RPC_PASSWORD` without launching the console.
+<details>
+<summary><b>Bootstrap Script (legacy)</b></summary>
+
+The `scripts/bootstrap_console_env.sh` script is available for advanced users who want environment setup without the launcher:
 
 ```bash
 source scripts/bootstrap_console_env.sh
-# Then start the console when ready:
 enigmatic-dgb console
 ```
 
-The ASCII console defaults to **dry-run/testing mode** for planner and sender
-flows so you can review the planned state vector for each command before
-issuing a broadcast flag. Outside the console, use `--dry-run` with
-`plan-*`/`send-*` commands to mirror the same guardrail.
+</details>
 
-## Repository Layout
-
-| Path | Purpose |
-| ---- | ------- |
-| [`enigmatic_dgb/`](enigmatic_dgb) | Python package: encoder/decoder, planner, transaction builder, RPC client, CLI entry point. |
-| [`specs/`](specs) | Canonical protocol chapters: overview → encoding primitives → formal model → encoding/decoding processes → dialects and security. |
-| [`docs/`](docs) | Whitepaper draft, architecture notes, tooling guide, roadmap, and RPC test plan. |
-| [`examples/`](examples) | Dialects plus decoded walkthroughs you can replay (see `examples/README.md`). |
-| [`tests/`](tests) | Pytest suite covering encoder, planner, decoder, and CLI utilities. |
-
-## Tooling Snapshot
-
-All CLI workflows live in `enigmatic_dgb/cli.py` and are documented in
-[`docs/TOOLING.md`](docs/TOOLING.md). Highlights:
-
-- **Plan or send a symbol from a dialect**: `enigmatic-dgb plan-symbol` /
-  `enigmatic-dgb send-symbol`
-- **Plan chained frames from a dialect**: `enigmatic-dgb plan-chain`
-- **Plan or send explicit sequences**: `enigmatic-dgb plan-sequence` /
-  `enigmatic-dgb send-sequence` and `enigmatic-dgb plan-pattern`
-- **Dialect lifecycle helpers**: `enigmatic-dgb dialect list|validate|generate` to
-  discover examples, lint YAML, or scaffold new dialects without hand-editing.
-- **UTXO utilities**: `enigmatic-dgb list-utxos` to inspect funding options, and
-  `enigmatic-dgb prepare-utxos` plus `--use-utxos` flags to carve and reuse
-  wallet-owned inputs for later signaling
-- **Free-form intents**: `enigmatic-dgb send-message`
-- **Unspendable vanity addresses**: `enigmatic-dgb unspendable DCx "THiSxiSxTHExSTUFF"`
-  → `DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo`
-- **Observation and decoding**: `enigmatic-dgb watch`, `dtsp-*`,
-  `binary-utxo-*`
-- **Ordinal inscriptions (Taproot + OP_RETURN)**: plan via
-  `enigmatic-dgb ord-plan-taproot`, sign/broadcast with
-  `enigmatic-dgb ord-inscribe`, or use the guided `enigmatic-dgb ord-wizard`
-  (also available inside the console).
-
-Typical workflow: **dry-run → review state vector → broadcast**. Wallet and RPC
-credentials are shared across commands via environment variables or a single
-`~/.enigmatic/config.yaml` file (override with `--config`). Legacy
-`~/.enigmatic.yaml` files are still read. Set credentials once and reuse
-every CLI subcommand. See [`docs/rpc_test_plan.md`](docs/rpc_test_plan.md) for
-reproducible on-chain experiments.
-
-## Unspendable addresses
-
-Some Enigmatic flows embed short, human-readable notes in **unspendable
-addresses** rather than the main state planes. These vanity strings use the
-upstream MacDougal character mapping preserved in
-`enigmatic_dgb/unspendable.py`, and the CLI exposes a static mapping by
-default. You can fork or wrap that mapping to introduce your own character set
-when composing alternate metadata channels.
-
-- **Prefix categories**: `DAx` (person), `DBx` (transport mechanism), `DCx`
-  (subject), `DDx` / `DEx` (half IPFS hash). The prefix determines the version
-  byte and how observers classify the embedded text.
-- **Usage constraints**: These addresses are intentionally unspendable and are
-  only for metadata or routing hints; never fund them with coins.
-- **Protocol guidance**: Use unspendable addresses when you want to surface a
-  subject line, reference a person’s name, or point at an external hash without
-  consuming value/fee/cardinality slots in the state-plane encoding.
-
-### Example: generate a subject vanity address
+<details>
+<summary><b>Running Tests</b></summary>
 
 ```bash
-enigmatic-dgb unspendable DCx "THiSxiSxTHExSTUFF"
-# → DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo
+# Install dev dependencies
+pip install -e .[dev]
+
+# Run full test suite
+pytest
+
+# Run specific test file
+pytest tests/test_encoder.py
+
+# Run with coverage
+pytest --cov=enigmatic_dgb
 ```
 
-The command pads the message to the required length, applies the MacDougal
-mapping, and encodes the result with a Base58Check checksum to create an
-address-like string that peers can route or index while recognizing it cannot
-be spent.
+</details>
 
-### Console + Taproot inscription workflow
+<details>
+<summary><b>CLI Command Reference</b></summary>
 
-The ASCII console now ships a Taproot inscription wizard (menu option **[9]**)
-that mirrors the `enigmatic-dgb ord-wizard` CLI command. It stitches together
-payload validation, fee policy checks, and the inscription builder so you can
-stay inside a single guided flow.
+**Planning & Sending:**
+- `plan-symbol` / `send-symbol` - Dialect-driven symbols
+- `plan-sequence` / `send-sequence` - Explicit sequences
+- `plan-pattern` - Custom value/fee patterns
+- `plan-chain` - Multi-frame dialect chains
+- `send-message` - Free-form intents
 
-**Setup:**
+**Taproot Inscriptions:**
+- `ord-wizard` - Interactive wizard
+- `ord-inscribe` - Direct inscription (with --scheme taproot)
+- `ord-plan-taproot` / `ord-plan-op-return` - Planning only
+- `ord-decode` - Decode inscription from txid
+- `ord-scan` - Scan blocks for inscriptions
+- `ord-mine` - Find inscriptions in wallet UTXOs
 
-1. Export DigiByte RPC credentials (`DGB_RPC_USER`, `DGB_RPC_PASSWORD`,
-   `DGB_RPC_HOST`, `DGB_RPC_PORT`) and point to a wallet loaded with Taproot
-   keys. The wizard defaults to `taproot-lab`; you can override with
-   `--wallet` or `DGB_RPC_WALLET`.
-2. Create and fund a Taproot descriptor wallet before launching the console.
-   The lab guide shows the `digibyte-cli createwallet "taproot-lab" ...` and
-   `getnewaddress ... bech32m` steps plus funding tips and fee/bumpfee
-   troubleshooting.
-3. Start `enigmatic-dgb console`, choose **[9] Taproot inscription wizard**, and
-   follow the prompts.
+**DTSP Messaging:**
+- `dtsp-encode` - Encode message to fee sequence
+- `dtsp-send` - Send DTSP handshake
+- `dtsp-decode` - Decode fee sequence to message
+- `dtsp-table` - Show symbol table
 
-**Capabilities inside the wizard / `ord-wizard`:**
+**Utilities:**
+- `unspendable` - Generate vanity address
+- `unspendable-decode` - Decode vanity address
+- `list-utxos` - Inspect wallet UTXOs
+- `prepare-utxos` - Pre-fragment for later use
+- `watch` - Observe address activity
+- `dialect` - Manage dialect files
 
-- Accepts plain text, JSON (compacted automatically), hex, or file payloads and
-  surfaces envelope/push/script sizing to enforce the 520-byte limit.
-- Computes fee options with an adjustable sat/vB floor, suggests `max-fee-sats`
-  caps, and prints the signed transaction for review.
-- Dry-runs by default; broadcasting requires explicit confirmation (`BROADCAST`
-  in the console or `--broadcast` via CLI) and reuses the same funding plan.
-- Uses the Taproot Dialect v1 encoder/decoder (`enigmatic/taproot-v1`) so
-  on-chain payloads align with [`docs/taproot-dialect-v1.md`](docs/taproot-dialect-v1.md).
+See [`docs/TOOLING.md`](docs/TOOLING.md) for complete command documentation.
 
-## History & Inspiration
+</details>
 
-Enigmatic sits in a long line of “messages hidden in plain sight”: from
-Histiaeus’ scalp-tattoo courier, to Enigma traffic that sounded ordinary but was
-mathematically scrambled, to Bitcoin’s genesis block embedding “The Times
-03/Jan/2009 Chancellor on brink of second bailout for banks.” The name nods to
-Enigma and the broader tradition of structured signalling over common channels,
-with DigiByte state planes as the medium. Read the full lineage in
-[`docs/whitepaper.md`](docs/whitepaper.md#2-historical-lineage-steganography-enigma-and-blockchain-signalling).
+---
 
-## Architecture Snapshot
+## 📜 History & Inspiration
 
-The reference stack keeps the formal model executable:
+From Histiaeus' scalp-tattoo courier in ancient Greece, to the Enigma machines of WWII, to Bitcoin's genesis block message, Enigmatic continues the tradition of **hiding messages in plain sight**.
 
-- `planner.py` selects UTXO sets and arranges change to satisfy dialect
-  constraints (cardinality, value headers, block spacing).
-- `tx_builder.py` assembles DigiByte transactions with deterministic ordering,
-  dust compliance, and optional OP_RETURN hints.
-- `encoder.py` / `decoder.py` translate intents to/from state vectors;
-  `watcher.py` observes chains of frames.
-- `rpc_client.py` wraps DigiByte JSON-RPC; tests and CLI share the same client.
+The protocol name honors the codebreakers of Bletchley Park—particularly **Alan Turing**—who proved that structured patterns can be decoded even when embedded in seemingly ordinary transmissions. Enigmatic brings this principle to blockchain: transactions look economically normal while encoding multi-dimensional state vectors that peers can interpret.
 
-`docs/ARCHITECTURE.md` links these modules to the spec chapters so auditors can
-trace every state plane from definition to implementation.
+---
 
-## Examples & Dialects
+## 🔒 Security & Deniability
 
-Replayable assets live in `examples/`:
+Enigmatic transactions remain:
+- ✅ **Economically plausible** - Normal fees, realistic amounts
+- ✅ **Policy-compliant** - Standard dust limits, no exotic scripts
+- ✅ **Deniable** - Patterns blend with organic usage
 
-- `dialect-heartbeat.yaml` and `dialect-intel.yaml` define symbols and frames.
-- `example-decoding-flow.md` shows how a multi-frame reply is parsed back into
-  symbols via `watcher.py`.
-- `examples/README.md` indexes additional motifs and decoded traces.
+The [Security Model](specs/06-security-model.md) details threat assumptions, detectability bounds, and cryptographic assumptions.
 
-### Showcase dialect (console-friendly)
+---
 
-- `examples/dialect-showcase.yaml` ships curated, safe sample payloads you can
-  load directly from the console’s "Dialect-driven symbols" menu. Symbols
-  include `genesis_bitcoin_2009`, `genesis_digibyte_2014`, `halving_cycle`,
-  `triptych_21_21_84`, `digishield_pulse`, `digiswarm_burst`,
-  `digidollar_steady`, and `hello_enigmatic`.
+## 📝 License
 
-Use `enigmatic-dgb plan-symbol --dialect-path examples/dialect-heartbeat.yaml --symbol HEARTBEAT --dry-run`
-to inspect a state vector before broadcasting it.
+MIT License - See [LICENSE](LICENSE) for details.
 
-## Security & Deniability
+---
 
-Enigmatic keeps transactions economically plausible and policy-compliant while
-embedding meaning in the joint distribution of state planes. The security model
-in [`specs/06-security-model.md`](specs/06-security-model.md) details threat
-assumptions, detectability bounds, and deniability considerations.
+## 🙏 Acknowledgments
 
-## Documentation Map
+Built with inspiration from:
+- 🔐 Alan Turing and the Bletchley Park codebreakers
+- 💰 Satoshi Nakamoto's Bitcoin genesis block message
+- ⛏️ The DigiByte community and its 12-year blockchain heritage
+- 📜 Bitcoin Ordinals theory for Taproot inscription patterns
 
-- Protocol specs: [`specs/`](specs)
-- Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Tooling guide: [`docs/TOOLING.md`](docs/TOOLING.md)
-- Whitepaper draft: [`docs/whitepaper.md`](docs/whitepaper.md)
-- Roadmap: [`docs/expansion-roadmap.md`](docs/expansion-roadmap.md)
+---
 
-## What’s Next
+## 🚀 What's Next?
 
-Near- and mid-term priorities emphasize production-grade wallet integration,
-expanded dialect coverage, and richer observability. See
-[`docs/expansion-roadmap.md`](docs/expansion-roadmap.md) for the tracked items
-and adoption milestones.
+See the [Expansion Roadmap](docs/expansion-roadmap.md) for planned features:
+- Enhanced dialect coverage
+- Wallet integration improvements
+- Advanced topology patterns
+- Expanded observability tools
 
-## License
-
-This project is licensed under the **MIT License**.
-See [`LICENSE`](LICENSE) for details.
+**Ready to start?** Just run `./console` and explore! 🎉
