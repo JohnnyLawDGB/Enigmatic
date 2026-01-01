@@ -21,6 +21,10 @@ from .inscriptions import (
     encode_enig_taproot_payload,
 )
 from .taproot import TaprootScriptBuilder
+from .taproot_builder import (
+    compute_taproot_output_from_script,
+    create_taproot_address,
+)
 from ..fees import (
     DEFAULT_CONF_TARGET,
     DEFAULT_ESTIMATE_MODE,
@@ -163,11 +167,42 @@ def prepare_inscription_transaction(
                 replaceable=rbf,
             )
         else:
-            try:
-                inscription_address = rpc.getnewaddress(address_type="bech32m")
-            except TypeError:  # pragma: no cover - older node compatibility
-                inscription_address = rpc.getnewaddress()
+            # Taproot inscription: build the commitment transaction
+            # This embeds the inscription in a Taproot script tree
 
+            # Get the planned leaf script
+            inscription_hex = plan.get("metadata", {}).get("taproot_script_hex")
+            if not inscription_hex:
+                raise InscriptionFlowError(
+                    "Planner did not emit a Taproot inscription script; aborting"
+                )
+
+            try:
+                leaf_script = bytes.fromhex(inscription_hex)
+            except ValueError as exc:
+                raise InscriptionFlowError(
+                    f"Invalid Taproot script hex from planner: {exc}"
+                ) from exc
+
+            # Get or use default internal key
+            internal_key_hex = plan.get("metadata", {}).get("internal_key_hex")
+            internal_key = bytes.fromhex(internal_key_hex) if internal_key_hex else None
+
+            # Compute the Taproot output with the inscription embedded
+            try:
+                taproot_output = compute_taproot_output_from_script(
+                    leaf_script, internal_key
+                )
+            except ValueError as exc:
+                raise InscriptionFlowError(
+                    f"Failed to compute Taproot output: {exc}"
+                ) from exc
+
+            # Create the commitment address from the tweaked output key
+            output_key = bytes.fromhex(taproot_output["output_key"])
+            inscription_address = create_taproot_address(output_key)
+
+            # Send a small amount to this Taproot output (commits the inscription)
             outputs_payload = [{inscription_address: 0.0001}]
             raw_tx = builder.build_custom_tx(
                 outputs_payload,
