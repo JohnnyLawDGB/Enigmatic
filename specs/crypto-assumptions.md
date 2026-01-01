@@ -1,4 +1,4 @@
-# Section 7 — Cryptographic Assumptions & Threat Bound Analysis
+# Cryptographic Assumptions & Threat Bound Analysis
 
 ## 7.1 Cryptographic Foundations
 Enigmatic-L0 relies on the hardness of several well-established primitives:

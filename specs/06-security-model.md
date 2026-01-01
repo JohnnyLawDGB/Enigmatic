@@ -35,9 +35,9 @@ Mitigation strategies:
 - **Ordering randomization:** Use canonical ordering for “steady state” and revert to pseudo-random permutations (still valid) during cover traffic windows. Decoders rely on repetition counts and metadata to distinguish signal vs. cover.
 - **Block alignment fuzzing:** Occasionally shift a frame by +1 block if DigiByte propagation delays would otherwise reveal a rigid schedule.
 
-## 6.5 Relationship to Section 7
+## 6.5 Relationship to Crypto Assumptions
 
-`specs/section7.md` formalizes the cryptographic assumptions (hash hardness, ECDSA security) and mutual-information bounds. Section 6 inherits those assumptions but focuses on pragmatic detectability defenses. Future revisions will merge redundant text by:
+`specs/crypto-assumptions.md` formalizes the cryptographic assumptions (hash hardness, ECDSA security) and mutual-information bounds. Section 6 inherits those assumptions but focuses on pragmatic detectability defenses. Future revisions will merge redundant text by:
 
-- Referencing Section 7 for proofs of `I(M;O) < δ` while keeping operational guidance here.
-- Sharing a unified adversary capability matrix between §§6.1 and 7.2.
+- Referencing the crypto-assumptions doc for proofs of `I(M;O) < δ` while keeping operational guidance here.
+- Sharing a unified adversary capability matrix between the security model and crypto assumptions.
