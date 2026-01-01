@@ -119,44 +119,53 @@ def _verify_broadcast(rpc: DigiByteRPC, txid: str) -> tuple[str, int | None, str
         - "confirmed": transaction is confirmed in a block
         - "unknown": could not verify transaction status
     """
-    # First try mempool - if found, tx is pending
-    try:
-        rpc.getmempoolentry(txid)
-        print(f"Transaction {txid[:16]}... is in mempool (unconfirmed)")
-        return "mempool", 0, None
-    except (RPCError, RPCTransportError):
-        pass  # Not in mempool - might be confirmed or rejected
+    # Temporarily suppress RPC error logging - these are expected during verification
+    rpc_logger = logging.getLogger("enigmatic_dgb.rpc_client")
+    original_level = rpc_logger.level
+    rpc_logger.setLevel(logging.CRITICAL)
 
-    # Try getrawtransaction to check if confirmed
     try:
-        tx_info = rpc.call("getrawtransaction", [txid, True])
-        confirmations = tx_info.get("confirmations", 0)
-        blockhash = tx_info.get("blockhash")
-        if confirmations > 0:
-            print(f"Transaction {txid[:16]}... already confirmed ({confirmations} confirmations)")
-            return "confirmed", confirmations, blockhash
-        else:
-            print(f"Transaction {txid[:16]}... found but unconfirmed")
+        # First try mempool - if found, tx is pending
+        try:
+            rpc.getmempoolentry(txid)
+            print(f"Transaction {txid[:16]}... is in mempool (unconfirmed)")
             return "mempool", 0, None
-    except (RPCError, RPCTransportError):
-        pass
+        except (RPCError, RPCTransportError):
+            pass  # Not in mempool - might be confirmed or rejected
 
-    # Fallback: try wallet gettransaction
-    try:
-        tx_info = rpc.gettransaction(txid)
-        confirmations = tx_info.get("confirmations", 0)
-        blockhash = tx_info.get("blockhash")
-        if confirmations > 0:
-            print(f"Transaction {txid[:16]}... confirmed ({confirmations} confirmations)")
-            return "confirmed", confirmations, blockhash
-        else:
-            print(f"Transaction {txid[:16]}... in wallet, awaiting confirmation")
-            return "mempool", 0, None
-    except (RPCError, RPCTransportError):
-        pass
+        # Try getrawtransaction to check if confirmed
+        try:
+            tx_info = rpc.call("getrawtransaction", [txid, True])
+            confirmations = tx_info.get("confirmations", 0)
+            blockhash = tx_info.get("blockhash")
+            if confirmations > 0:
+                print(f"Transaction {txid[:16]}... already confirmed ({confirmations} confirmations)")
+                return "confirmed", confirmations, blockhash
+            else:
+                print(f"Transaction {txid[:16]}... found but unconfirmed")
+                return "mempool", 0, None
+        except (RPCError, RPCTransportError):
+            pass
 
-    print(f"Warning: Could not verify status of {txid[:16]}...")
-    return "unknown", None, None
+        # Fallback: try wallet gettransaction
+        try:
+            tx_info = rpc.gettransaction(txid)
+            confirmations = tx_info.get("confirmations", 0)
+            blockhash = tx_info.get("blockhash")
+            if confirmations > 0:
+                print(f"Transaction {txid[:16]}... confirmed ({confirmations} confirmations)")
+                return "confirmed", confirmations, blockhash
+            else:
+                print(f"Transaction {txid[:16]}... in wallet, awaiting confirmation")
+                return "mempool", 0, None
+        except (RPCError, RPCTransportError):
+            pass
+
+        print(f"Warning: Could not verify status of {txid[:16]}...")
+        return "unknown", None, None
+    finally:
+        # Restore original logging level
+        rpc_logger.setLevel(original_level)
 
 
 def run_enigmatic_cli(args: Sequence[str]) -> int:
@@ -1520,6 +1529,11 @@ def handle_taproot_wizard() -> None:
 
     txid = prepared.txid or "?"
     print(f"Broadcasted txid: {txid}")
+
+    # Give transaction time to propagate before checking status
+    # DigiByte blocks are fast (15s), so transactions can confirm very quickly
+    print("Checking transaction status...", flush=True)
+    time.sleep(2)
 
     # Verify transaction status (handles fast confirmations gracefully)
     tx_status, initial_confs, initial_blockhash = _verify_broadcast(rpc, txid)
