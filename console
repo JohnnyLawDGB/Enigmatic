@@ -1,0 +1,129 @@
+#!/bin/bash
+# Enigmatic Console Launcher
+# Sets up RPC environment and launches the interactive console
+
+set -e
+
+# Color codes for pretty output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║  Enigmatic Console Environment Setup  ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+echo ""
+
+# Check if we're in the right directory
+if [ ! -f "enigmatic_dgb/__init__.py" ]; then
+    echo -e "${RED}Error: Please run this script from the Enigmatic project root directory${NC}"
+    exit 1
+fi
+
+# Function to prompt for value with default
+prompt_with_default() {
+    local prompt="$1"
+    local default="$2"
+    local value
+
+    if [ -n "$default" ]; then
+        read -p "$prompt [$default]: " value
+        echo "${value:-$default}"
+    else
+        read -p "$prompt: " value
+        echo "$value"
+    fi
+}
+
+# Function to prompt for password (hidden input)
+prompt_password() {
+    local prompt="$1"
+    local value
+
+    read -s -p "$prompt: " value
+    echo ""  # New line after hidden input
+    echo "$value"
+}
+
+# Check if RPC credentials are already in environment
+if [ -n "$DGB_RPC_USER" ] && [ -n "$DGB_RPC_PASSWORD" ] && [ -n "$DGB_RPC_HOST" ] && [ -n "$DGB_RPC_PORT" ]; then
+    echo -e "${GREEN}✓ RPC credentials found in environment${NC}"
+    echo "  User: $DGB_RPC_USER"
+    echo "  Host: $DGB_RPC_HOST:$DGB_RPC_PORT"
+    echo ""
+
+    read -p "Use existing credentials? [Y/n]: " use_existing
+    if [[ ! "$use_existing" =~ ^[Nn] ]]; then
+        echo -e "${GREEN}Using existing RPC configuration${NC}"
+        echo ""
+    else
+        unset DGB_RPC_USER DGB_RPC_PASSWORD DGB_RPC_HOST DGB_RPC_PORT
+    fi
+fi
+
+# Prompt for credentials if not set
+if [ -z "$DGB_RPC_USER" ]; then
+    echo -e "${YELLOW}RPC credentials not found. Please enter your DigiByte node details:${NC}"
+    echo ""
+
+    export DGB_RPC_USER=$(prompt_with_default "RPC Username" "")
+    export DGB_RPC_PASSWORD=$(prompt_password "RPC Password")
+    export DGB_RPC_HOST=$(prompt_with_default "RPC Host" "127.0.0.1")
+    export DGB_RPC_PORT=$(prompt_with_default "RPC Port" "14022")
+
+    echo ""
+    echo -e "${GREEN}✓ RPC credentials configured${NC}"
+    echo ""
+fi
+
+# Check if we should save credentials to .enigmatic.yaml
+if [ ! -f "$HOME/.enigmatic.yaml" ]; then
+    echo -e "${YELLOW}No ~/.enigmatic.yaml found${NC}"
+    read -p "Save credentials to ~/.enigmatic.yaml for future use? [y/N]: " save_config
+
+    if [[ "$save_config" =~ ^[Yy] ]]; then
+        cat > "$HOME/.enigmatic.yaml" <<EOF
+rpc:
+  host: $DGB_RPC_HOST
+  port: $DGB_RPC_PORT
+  user: $DGB_RPC_USER
+  password: $DGB_RPC_PASSWORD
+EOF
+        echo -e "${GREEN}✓ Saved to ~/.enigmatic.yaml${NC}"
+        echo ""
+    fi
+fi
+
+# Check if virtual environment exists
+if [ ! -d ".venv" ]; then
+    echo -e "${YELLOW}Warning: No .venv directory found${NC}"
+    echo "You may need to install dependencies first:"
+    echo "  python3 -m venv .venv"
+    echo "  source .venv/bin/activate"
+    echo "  pip install -e ."
+    echo ""
+    read -p "Continue anyway? [y/N]: " continue_anyway
+    if [[ ! "$continue_anyway" =~ ^[Yy] ]]; then
+        exit 0
+    fi
+fi
+
+# Activate virtual environment if it exists
+if [ -d ".venv" ]; then
+    echo -e "${GREEN}Activating virtual environment...${NC}"
+    source .venv/bin/activate
+fi
+
+# Launch the console
+echo -e "${GREEN}Launching Enigmatic Console...${NC}"
+echo ""
+
+# Export credentials and run
+export DGB_RPC_USER
+export DGB_RPC_PASSWORD
+export DGB_RPC_HOST
+export DGB_RPC_PORT
+
+python3 -m enigmatic_dgb.cli console
