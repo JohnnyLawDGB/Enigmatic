@@ -15,7 +15,9 @@ from typing import Any, List, Sequence
 
 from . import cli
 from . import prime_ladder
+from . import unspendable
 from .decoder import ObservedTx
+from .splash import show_startup_message
 from .dtsp import (
     DTSP_CONTROL,
     DTSPEncodingError,
@@ -1238,6 +1240,85 @@ def handle_help() -> None:
     _pause()
 
 
+def handle_unspendable_addresses() -> None:
+    """Interactive menu for generating and decoding unspendable addresses."""
+
+    print("\nUnspendable Address Tools\n" + "-" * 32)
+    print(
+        textwrap.dedent(
+            """
+            [1] Generate unspendable address
+            [2] Decode unspendable address
+            [0] Back to main menu
+            """
+        )
+    )
+
+    while True:
+        choice = input("Select an option: ").strip().lower()
+        if choice in {"b", "0"}:
+            return
+
+        if choice == "1":
+            # Generate unspendable address
+            print("\nGenerate Unspendable Address")
+            print("-" * 32)
+            print(
+                textwrap.dedent(
+                    """
+                    Unspendable addresses use the DiMECASH/Base58 mapping to encode
+                    human-readable messages. They are provably unspendable (no one
+                    has the private key) and serve as on-chain markers or labels.
+
+                    Common prefixes:
+                      DAx = Type A marker
+                      DBx = Type B marker
+                      DCx = Type C marker (most common)
+                    """
+                )
+            )
+
+            prefix = prompt_str("Prefix (e.g., DCx)", default="DCx")
+            message = prompt_str("Message to encode")
+
+            try:
+                address = unspendable.generate_address(prefix, message)
+                print(f"\n✓ Unspendable address: {address}")
+                print("\n⚠️  WARNING: Do NOT send funds to this address!")
+                print("    This address is provably unspendable - funds sent here are permanently lost.")
+            except ValueError as exc:
+                print(f"Error: {exc}")
+
+            _pause()
+            return
+
+        elif choice == "2":
+            # Decode unspendable address
+            print("\nDecode Unspendable Address")
+            print("-" * 32)
+
+            address = prompt_str("Address to decode")
+            expect_prefix = prompt_str("Expected prefix (optional, press Enter to skip)", default="")
+
+            try:
+                prefix, message = unspendable.decode_address(address)
+
+                if expect_prefix and prefix != expect_prefix:
+                    print(f"\n⚠️  Warning: Expected prefix '{expect_prefix}' but got '{prefix}'")
+
+                print(f"\n✓ Decoded successfully!")
+                print(f"  Prefix: {prefix}")
+                print(f"  Message: {message}")
+            except ValueError as exc:
+                print(f"Error: {exc}")
+
+            _pause()
+            return
+
+        else:
+            print("Invalid selection, please try again.\n")
+
+
 def _wizard_print_policy(rpc: DigiByteRPC) -> None:
     ok_mem, mempool = _safe_rpc_call(rpc.getmempoolinfo, friendly_name="getmempoolinfo")
     ok_net, netinfo = _safe_rpc_call(rpc.getnetworkinfo, friendly_name="getnetworkinfo")
@@ -1312,6 +1393,7 @@ def _render_menu() -> None:
             [7] Address analysis (DTSP + binary)
             [8] Prime ladder (ladder steps)
             [9] Taproot inscription wizard
+            [10] Unspendable addresses (generate/decode)
             [H] Help / Docs pointers
             [Q] Quit
             --------
@@ -1322,6 +1404,9 @@ def _render_menu() -> None:
 
 def console_main() -> None:
     """Launch the interactive ASCII console."""
+
+    # Show splash screen on first launch
+    show_startup_message()
 
     while True:
         _render_menu()
@@ -1347,6 +1432,8 @@ def console_main() -> None:
             handle_prime_ladder()
         elif selection == "9":
             handle_taproot_wizard()
+        elif selection == "10":
+            handle_unspendable_addresses()
         elif selection in {"h", "?"}:
             handle_help()
         else:
