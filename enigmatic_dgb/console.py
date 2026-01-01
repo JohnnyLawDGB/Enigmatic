@@ -110,6 +110,55 @@ def _safe_rpc_call(func, *, friendly_name: str) -> tuple[bool, Any]:
         return False, None
 
 
+def _verify_broadcast(rpc: DigiByteRPC, txid: str) -> tuple[str, int | None, str | None]:
+    """Verify transaction status after broadcast.
+
+    Returns:
+        (status, confirmations, blockhash) where status is one of:
+        - "mempool": transaction is in mempool, unconfirmed
+        - "confirmed": transaction is confirmed in a block
+        - "unknown": could not verify transaction status
+    """
+    # First try mempool - if found, tx is pending
+    try:
+        rpc.getmempoolentry(txid)
+        print(f"Transaction {txid[:16]}... is in mempool (unconfirmed)")
+        return "mempool", 0, None
+    except (RPCError, RPCTransportError):
+        pass  # Not in mempool - might be confirmed or rejected
+
+    # Try getrawtransaction to check if confirmed
+    try:
+        tx_info = rpc.call("getrawtransaction", [txid, True])
+        confirmations = tx_info.get("confirmations", 0)
+        blockhash = tx_info.get("blockhash")
+        if confirmations > 0:
+            print(f"Transaction {txid[:16]}... already confirmed ({confirmations} confirmations)")
+            return "confirmed", confirmations, blockhash
+        else:
+            print(f"Transaction {txid[:16]}... found but unconfirmed")
+            return "mempool", 0, None
+    except (RPCError, RPCTransportError):
+        pass
+
+    # Fallback: try wallet gettransaction
+    try:
+        tx_info = rpc.gettransaction(txid)
+        confirmations = tx_info.get("confirmations", 0)
+        blockhash = tx_info.get("blockhash")
+        if confirmations > 0:
+            print(f"Transaction {txid[:16]}... confirmed ({confirmations} confirmations)")
+            return "confirmed", confirmations, blockhash
+        else:
+            print(f"Transaction {txid[:16]}... in wallet, awaiting confirmation")
+            return "mempool", 0, None
+    except (RPCError, RPCTransportError):
+        pass
+
+    print(f"Warning: Could not verify status of {txid[:16]}...")
+    return "unknown", None, None
+
+
 def run_enigmatic_cli(args: Sequence[str]) -> int:
     """Invoke the Enigmatic CLI via subprocess or internal dispatcher."""
 
@@ -1471,14 +1520,28 @@ def handle_taproot_wizard() -> None:
 
     txid = prepared.txid or "?"
     print(f"Broadcasted txid: {txid}")
-    _safe_rpc_call(lambda: rpc.getmempoolentry(txid), friendly_name="getmempoolentry (post-broadcast)")
-    _safe_rpc_call(lambda: rpc.gettransaction(txid), friendly_name="gettransaction (wallet)")
+
+    # Verify transaction status (handles fast confirmations gracefully)
+    tx_status, initial_confs, initial_blockhash = _verify_broadcast(rpc, txid)
 
     replacements: list[str] = []
-    confirmed_blockhash: str | None = None
+    confirmed_blockhash: str | None = initial_blockhash
     confirmed_height: int | None = None
 
-    monitor = input("Monitor until confirmed? [y/N]: ").strip().lower().startswith("y")
+    # If already confirmed, try to get block height
+    if tx_status == "confirmed" and initial_blockhash:
+        try:
+            block_info = rpc.call("getblock", [initial_blockhash])
+            confirmed_height = block_info.get("height")
+        except (RPCError, RPCTransportError):
+            pass
+
+    # Only prompt to monitor if not already confirmed
+    if tx_status == "confirmed":
+        monitor = False
+        print("Transaction already confirmed, skipping monitor.")
+    else:
+        monitor = input("Monitor until confirmed? [y/N]: ").strip().lower().startswith("y")
     if monitor:
         threshold_seconds = prompt_int("Auto-bump after how many seconds?", default=120) or 120
         bump_rate_default = max(prepared.fee_selection.fee_rate_sat_vb, min_floor or 0) + 1000
