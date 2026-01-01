@@ -47,19 +47,38 @@ prompt_password() {
     echo "$value"
 }
 
+# Try to load credentials from ~/.enigmatic.yaml first
+if [ -f "$HOME/.enigmatic.yaml" ] && [ -z "$DGB_RPC_USER" ]; then
+    echo -e "${GREEN}✓ Found ~/.enigmatic.yaml${NC}"
+    # Load credentials from YAML using Python
+    CREDS=$(python3 -c "import yaml; f=open('$HOME/.enigmatic.yaml'); c=yaml.safe_load(f); r=c.get('rpc',{}); print(f\"{r.get('user','')}|{r.get('password','')}|{r.get('host','127.0.0.1')}|{r.get('port','14022')}|{r.get('wallet','')}\")" 2>/dev/null)
+
+    if [ -n "$CREDS" ]; then
+        IFS='|' read -r YAML_USER YAML_PASS YAML_HOST YAML_PORT YAML_WALLET <<< "$CREDS"
+
+        if [ -n "$YAML_USER" ] && [ -n "$YAML_PASS" ]; then
+            export DGB_RPC_USER="$YAML_USER"
+            export DGB_RPC_PASSWORD="$YAML_PASS"
+            export DGB_RPC_HOST="$YAML_HOST"
+            export DGB_RPC_PORT="$YAML_PORT"
+            export DGB_RPC_WALLET="$YAML_WALLET"
+
+            echo "  User: $DGB_RPC_USER"
+            echo "  Host: $DGB_RPC_HOST:$DGB_RPC_PORT"
+            echo "  Wallet: ${DGB_RPC_WALLET:-not specified}"
+            echo ""
+        fi
+    fi
+fi
+
 # Check if RPC credentials are already in environment
 if [ -n "$DGB_RPC_USER" ] && [ -n "$DGB_RPC_PASSWORD" ] && [ -n "$DGB_RPC_HOST" ] && [ -n "$DGB_RPC_PORT" ]; then
-    echo -e "${GREEN}✓ RPC credentials found in environment${NC}"
-    echo "  User: $DGB_RPC_USER"
-    echo "  Host: $DGB_RPC_HOST:$DGB_RPC_PORT"
-    echo ""
-
     read -p "Use existing credentials? [Y/n]: " use_existing
     if [[ ! "$use_existing" =~ ^[Nn] ]]; then
         echo -e "${GREEN}Using existing RPC configuration${NC}"
         echo ""
     else
-        unset DGB_RPC_USER DGB_RPC_PASSWORD DGB_RPC_HOST DGB_RPC_PORT
+        unset DGB_RPC_USER DGB_RPC_PASSWORD DGB_RPC_HOST DGB_RPC_PORT DGB_RPC_WALLET
     fi
 fi
 
@@ -72,6 +91,7 @@ if [ -z "$DGB_RPC_USER" ]; then
     export DGB_RPC_PASSWORD=$(prompt_password "RPC Password")
     export DGB_RPC_HOST=$(prompt_with_default "RPC Host" "127.0.0.1")
     export DGB_RPC_PORT=$(prompt_with_default "RPC Port" "14022")
+    export DGB_RPC_WALLET=$(prompt_with_default "RPC Wallet" "")
 
     echo ""
     echo -e "${GREEN}✓ RPC credentials configured${NC}"
@@ -89,7 +109,8 @@ rpc:
   host: $DGB_RPC_HOST
   port: $DGB_RPC_PORT
   user: $DGB_RPC_USER
-  password: $DGB_RPC_PASSWORD
+  password: "$DGB_RPC_PASSWORD"
+  wallet: $DGB_RPC_WALLET
 EOF
         echo -e "${GREEN}✓ Saved to ~/.enigmatic.yaml${NC}"
         echo ""
@@ -125,5 +146,6 @@ export DGB_RPC_USER
 export DGB_RPC_PASSWORD
 export DGB_RPC_HOST
 export DGB_RPC_PORT
+export DGB_RPC_WALLET
 
 python3 -m enigmatic_dgb.cli console
