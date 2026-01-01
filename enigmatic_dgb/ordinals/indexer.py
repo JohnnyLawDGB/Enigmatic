@@ -214,7 +214,7 @@ class OrdinalIndexer:
             empty if no inscription-style data is detected.
         """
 
-        verbose_tx = self.rpc_client.get_raw_transaction(txid, verbose=True)
+        verbose_tx = self.rpc_client.getrawtransaction(txid, verbose=True)
         pseudo_block = {"tx": [verbose_tx], "height": verbose_tx.get("height")}
         config = OrdinalScanConfig(
             start_height=None,

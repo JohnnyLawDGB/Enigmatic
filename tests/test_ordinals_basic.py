@@ -18,7 +18,7 @@ class MockRPC:
         assert height == self.block.get("height")
         return self.block
 
-    def get_raw_transaction(self, txid: str, verbose: bool = False) -> dict:
+    def getrawtransaction(self, txid: str, verbose: bool = False) -> dict:
         assert txid == self.verbose_tx.get("txid")
         return self.verbose_tx
 

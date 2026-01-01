@@ -60,7 +60,7 @@ def inspect_output_for_taproot(rpc_client, txid: str, vout: int) -> TaprootScrip
     blocks, possible leaf scripts) for downstream inscription detection.
     """
 
-    verbose_tx: Dict[str, Any] = rpc_client.get_raw_transaction(txid, verbose=True)
+    verbose_tx: Dict[str, Any] = rpc_client.getrawtransaction(txid, verbose=True)
     outputs = verbose_tx.get("vout", [])
     target_output = next((o for o in outputs if o.get("n") == vout), None)
     script_pubkey = target_output.get("scriptPubKey", {}) if target_output else {}

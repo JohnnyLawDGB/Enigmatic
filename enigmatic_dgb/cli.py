@@ -1963,7 +1963,7 @@ def cmd_ord_scan(args: argparse.Namespace) -> None:
         with _get_index_store(args) as index_store:
             index_store_path = index_store.db_path
             for txid in txids:
-                verbose_tx = rpc.get_raw_transaction(txid, verbose=True)
+                verbose_tx = rpc.getrawtransaction(txid, verbose=True)
                 address_map = _extract_output_addresses(verbose_tx)
                 payloads = decoder.decode_from_tx(txid)
                 for payload in payloads:

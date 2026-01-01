@@ -160,7 +160,7 @@ class OrdinalInscriptionDecoder:
         OP_RETURN flows.
         """
 
-        tx = self.rpc_client.get_raw_transaction(txid, verbose=True)
+        tx = self.rpc_client.getrawtransaction(txid, verbose=True)
         indexer = OrdinalIndexer(self.rpc_client)
         locations = indexer.scan_tx(txid)
         return _extract_candidate_payloads_from_tx(tx, locations, rpc_client=self.rpc_client)
