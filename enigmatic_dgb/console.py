@@ -176,7 +176,8 @@ def run_enigmatic_cli(args: Sequence[str]) -> int:
     executable = shutil.which("enigmatic-dgb")
     if executable:
         print(f"Running CLI: {executable} {' '.join(args)}")
-        result = subprocess.run([executable, *args], capture_output=True, text=True)
+        # Explicitly pass environment to subprocess to ensure RPC credentials are available
+        result = subprocess.run([executable, *args], capture_output=True, text=True, env=os.environ.copy())
         if result.stdout:
             print(result.stdout)
         if result.stderr:

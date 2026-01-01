@@ -33,3 +33,6 @@ Thumbs.db
 
 # Local test fixtures (generated during development)
 *.local.json
+
+# User transaction receipts (generated during usage)
+receipts/
