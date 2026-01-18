@@ -82,6 +82,9 @@ class AgentStateStore:
     def list_pending_actions(self) -> List[ActionRequest]:
         return list(self._pending_actions.values())
 
+    def get_pending_action(self, action_id: str) -> ActionRequest | None:
+        return self._pending_actions.get(action_id)
+
     def resolve_action(
         self,
         action_id: str,

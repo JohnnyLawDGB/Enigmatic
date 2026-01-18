@@ -1,4 +1,4 @@
-from enigmatic_dgb.agent.actions import ActionRequest, ActionStatus
+from enigmatic_dgb.agent.actions import ActionRequest
 from enigmatic_dgb.agent.chat import ChatHandler, parse_user_message
 from enigmatic_dgb.agent.state import AgentStateStore
 
@@ -29,11 +29,6 @@ def test_chat_pending_actions() -> None:
     handler = ChatHandler(state)
     response = handler.handle("pending actions")
     assert action.action_id in response.message
-
-    approve = handler.handle(f"approve {action.action_id}")
-    assert "approved" in approve.message.lower()
-    pending = state.list_pending_actions()[0]
-    assert pending.status == ActionStatus.APPROVED
 
 
 def test_chat_help() -> None:

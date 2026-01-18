@@ -57,6 +57,9 @@
 * `actions.py` models action requests/results with statuses for approvals and execution tracking.
 * `state.py` provides a shared state store (recent events, idempotency set, pending actions, history, preferences) with optional persistence.
 * `audit.py` emits append-only JSONL audit entries for events and actions.
+* `policy.py` applies internal approval rules to allow or block actions.
+* `dispatcher.py` routes approved actions to handlers (e.g., notifications).
+* `coordinator.py` wires events, policy checks, dispatch, and notifications into a single flow.
 
 ## 2. Data flow
 

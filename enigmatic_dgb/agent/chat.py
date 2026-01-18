@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from .actions import ActionStatus
 from .events import AgentEvent
 from .state import AgentStateStore
 
@@ -92,28 +91,6 @@ def parse_user_message(message: str) -> ParsedIntent:
     if "action history" in lowered or "recent actions" in lowered:
         candidates.append(ParsedIntent("show_action_history", 0.6))
 
-    approve_match = re.search(r"\bapprove(?:\s+action)?\s+([0-9a-f]+)\b", lowered)
-    if approve_match:
-        candidates.append(
-            ParsedIntent(
-                "approve_action",
-                0.9,
-                payload={"action_id": approve_match.group(1)},
-                matched=("approve_action",),
-            )
-        )
-
-    reject_match = re.search(r"\breject(?:\s+action)?\s+([0-9a-f]+)\b", lowered)
-    if reject_match:
-        candidates.append(
-            ParsedIntent(
-                "reject_action",
-                0.9,
-                payload={"action_id": reject_match.group(1)},
-                matched=("reject_action",),
-            )
-        )
-
     if not candidates:
         return ParsedIntent(
             intent="unknown",
@@ -164,13 +141,6 @@ class ChatHandler:
             return ChatResponse(self._summarize_preferences())
         if intent.intent == "show_action_history":
             return ChatResponse(self._summarize_action_history())
-        if intent.intent == "approve_action":
-            action_id = intent.payload.get("action_id")
-            return self._approve_action(action_id)
-        if intent.intent == "reject_action":
-            action_id = intent.payload.get("action_id")
-            return self._reject_action(action_id)
-
         return ChatResponse("I couldn't parse that. Try 'help'.")
 
     def _help_text(self) -> str:
@@ -181,7 +151,6 @@ class ChatHandler:
                 "- status / recent events",
                 "- set alert threshold to <number>",
                 "- pending actions",
-                "- approve <action_id> | reject <action_id>",
                 "- preferences",
                 "- action history",
             ]
@@ -213,7 +182,7 @@ class ChatHandler:
             lines.append(
                 f"- {action.action_id} {action.action_type} status={action.status.value}"
             )
-        lines.append("Reply with 'approve <id>' or 'reject <id>'.")
+        lines.append("Approvals are handled internally.")
         return "\n".join(lines)
 
     def _summarize_preferences(self) -> str:
@@ -236,23 +205,3 @@ class ChatHandler:
                 f"{entry.status.value}"
             )
         return "\n".join(lines)
-
-    def _approve_action(self, action_id: str | None) -> ChatResponse:
-        if not action_id:
-            return ChatResponse("Provide the action id to approve.")
-        try:
-            action = self.state.update_pending_action_status(
-                action_id, ActionStatus.APPROVED
-            )
-        except KeyError:
-            return ChatResponse(f"Unknown action id: {action_id}")
-        return ChatResponse(f"Action {action.action_id} approved.")
-
-    def _reject_action(self, action_id: str | None) -> ChatResponse:
-        if not action_id:
-            return ChatResponse("Provide the action id to reject.")
-        try:
-            self.state.resolve_action(action_id, ActionStatus.REJECTED)
-        except KeyError:
-            return ChatResponse(f"Unknown action id: {action_id}")
-        return ChatResponse(f"Action {action_id} rejected.")
