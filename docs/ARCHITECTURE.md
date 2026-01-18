@@ -50,6 +50,13 @@
 
 ### 1.9 Tests (`tests/`)
 * `test_enigmatic_roundtrip.py` covers encoder/decoder interoperability and packet grouping heuristics.
+* `test_agent_state.py` validates the hybrid agent state store and schema round-trips.
+
+### 1.10 Hybrid Agent Foundations (`enigmatic_dgb.agent`)
+* `events.py` defines the canonical event schema (`AgentEvent`) used by event monitors and chat flows.
+* `actions.py` models action requests/results with statuses for approvals and execution tracking.
+* `state.py` provides a shared state store (recent events, idempotency set, pending actions, history, preferences) with optional persistence.
+* `audit.py` emits append-only JSONL audit entries for events and actions.
 
 ## 2. Data flow
 
