@@ -70,6 +70,7 @@ from .ordinals.workflows import (
     suggest_max_fee_sats,
     write_receipt,
 )
+from .ordinals.reveal import TaprootRevealError, build_taproot_reveal_tx
 from .ordinals.taproot_builder import (
     compute_taproot_output_from_script,
     create_taproot_address,
@@ -1164,6 +1165,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum fee rate floor in sat/vB applied after estimation",
     )
     ord_inscribe_parser.set_defaults(broadcast=False, rbf=True)
+
+    ord_reveal_parser = subparsers.add_parser(
+        "ord-reveal",
+        help="Spend a taproot commitment output to reveal an inscription",
+    )
+    ord_reveal_parser.add_argument("commit_txid", help="Commit transaction id")
+    ord_reveal_parser.add_argument(
+        "message",
+        help="Inscription payload as UTF-8 text or 0x-prefixed hex",
+    )
+    ord_reveal_parser.add_argument(
+        "--to-address",
+        required=True,
+        help="Destination address for the reveal output",
+    )
+    ord_reveal_parser.add_argument(
+        "--content-type",
+        default="text/plain",
+        help="Content type hint stored alongside the payload (default: text/plain)",
+    )
+    ord_reveal_parser.add_argument(
+        "--commit-vout",
+        type=int,
+        help="Explicit commitment output index (defaults to first Taproot output)",
+    )
+    ord_reveal_parser.add_argument(
+        "--internal-key-hex",
+        help="Override the internal key used for Taproot tweaking",
+    )
+    ord_reveal_parser.add_argument(
+        "--fee",
+        default="0.00001",
+        help="Fee paid from the commit output (default: 0.00001 DGB)",
+    )
+    ord_reveal_parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="Broadcast the reveal transaction (default: dry-run)",
+    )
+    ord_reveal_parser.set_defaults(broadcast=False)
     ord_wizard_parser = subparsers.add_parser(
         "ord-wizard",
         help="Guided Taproot inscription wizard (interactive or parameterized)",
@@ -2550,6 +2591,47 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
     print(f"Broadcasted inscription transaction: {txid}")
 
 
+def cmd_ord_reveal(args: argparse.Namespace) -> None:
+    rpc = _rpc_client()
+    payload = _parse_inscription_message(args.message)
+    if not payload:
+        raise CLIError("Reveal payload is empty; provide a non-empty message")
+
+    try:
+        result = build_taproot_reveal_tx(
+            rpc,
+            args.commit_txid,
+            args.to_address,
+            payload,
+            args.content_type,
+            commit_vout=args.commit_vout,
+            fee_dgb=args.fee,
+            internal_key_hex=args.internal_key_hex,
+        )
+    except TaprootRevealError as exc:
+        raise CLIError(str(exc)) from exc
+
+    print(
+        "Taproot reveal plan: "
+        f"vout={result['commit_vout']} output_amount={result['output_amount']:.8f} "
+        f"fee={result['fee_dgb']:.8f}"
+    )
+
+    if not args.broadcast:
+        print("Broadcast disabled (default). Signed transaction (hex):")
+        print(result["raw_tx"])
+        return
+
+    try:
+        txid = rpc.sendrawtransaction(result["raw_tx"])
+    except RPCError as exc:
+        hint = format_rpc_hint(exc)
+        hint_suffix = f"\nHint: {hint}" if hint else ""
+        raise CLIError(f"Broadcast failed: {exc}{hint_suffix}") from exc
+
+    print(f"Broadcasted reveal transaction: {txid}")
+
+
 def _resolve_wizard_payload(args: argparse.Namespace) -> tuple[bytes, str]:
     if args.payload_file:
         payload_path = Path(args.payload_file).expanduser()
@@ -3271,6 +3353,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd_ord_plan_taproot(args)
         elif args.command == "ord-inscribe":
             cmd_ord_inscribe(args)
+        elif args.command == "ord-reveal":
+            cmd_ord_reveal(args)
         elif args.command == "ord-wizard":
             cmd_ord_wizard(args)
         elif args.command == "send-symbol":

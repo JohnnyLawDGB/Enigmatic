@@ -598,7 +598,116 @@ def _extract_candidate_payloads_from_tx(
                 )
             )
 
+    payloads.extend(_extract_enig_taproot_from_witness(tx_json))
+
     return payloads
+
+
+def _extract_enig_taproot_from_witness(
+    tx_json: Dict[str, Any],
+) -> List[InscriptionPayload]:
+    payloads: List[InscriptionPayload] = []
+    txid = tx_json.get("txid") or tx_json.get("hash") or "unknown"
+    height = tx_json.get("height")
+
+    witness_fields: List[str] = []
+    for vin in tx_json.get("vin", []) or []:
+        witness_fields.extend(vin.get("txinwitness") or [])
+
+    for item in witness_fields:
+        try:
+            raw = bytes.fromhex(item)
+        except ValueError:
+            continue
+
+        envelope = _extract_envelope_from_leaf_script(raw)
+        if envelope is None:
+            continue
+        magic_index = envelope.find(ENIG_TAPROOT_MAGIC)
+        if magic_index == -1:
+            continue
+        envelope = envelope[magic_index:]
+        try:
+            version, content_type, payload_bytes = decode_enig_taproot_payload(
+                envelope
+            )
+        except ValueError:
+            continue
+
+        decoded_text: Optional[str] = None
+        if content_type and (
+            content_type.startswith("text/")
+            or content_type == "application/json"
+            or content_type.endswith("+json")
+        ):
+            decoded_text = (
+                payload_bytes.decode("utf-8", errors="replace")
+                if payload_bytes
+                else ""
+            )
+
+        decoded_json: Optional[Dict[str, Any]] = None
+        if content_type == "application/json" and decoded_text:
+            try:
+                decoded_json = json.loads(decoded_text)
+            except (json.JSONDecodeError, TypeError):
+                decoded_json = None
+
+        location = OrdinalLocation(
+            txid=txid,
+            vout=0,
+            height=height,
+            ordinal_hint="enig_taproot_reveal",
+            tags={"taproot_reveal", "enigmatic_inscription"},
+        )
+
+        metadata = InscriptionMetadata(
+            location=location,
+            protocol=ENIG_TAPROOT_PROTOCOL,
+            version=version,
+            content_type=content_type,
+            length=len(payload_bytes),
+            codec="enigmatic/taproot-v1",
+            notes="Enigmatic Taproot inscription witness (reveal)",
+        )
+
+        payloads.append(
+            InscriptionPayload(
+                metadata=metadata,
+                raw_payload=payload_bytes,
+                decoded_text=decoded_text,
+                decoded_json=decoded_json,
+            )
+        )
+
+    return payloads
+
+
+def _extract_envelope_from_leaf_script(leaf_script: bytes) -> Optional[bytes]:
+    if len(leaf_script) < 4 or leaf_script[0] != 0x00 or leaf_script[1] != 0x63:
+        return None
+    cursor = 2
+    op = leaf_script[cursor]
+    cursor += 1
+
+    if op <= 75:
+        length = op
+    elif op == 0x4C:
+        if cursor >= len(leaf_script):
+            return None
+        length = leaf_script[cursor]
+        cursor += 1
+    elif op == 0x4D:
+        if cursor + 1 >= len(leaf_script):
+            return None
+        length = int.from_bytes(leaf_script[cursor : cursor + 2], "little")
+        cursor += 2
+    else:
+        return None
+
+    if cursor + length > len(leaf_script):
+        return None
+    return leaf_script[cursor : cursor + length]
 
 
 def _extract_op_return_hex(script_pub_key: Dict[str, Any]) -> Optional[str]:
