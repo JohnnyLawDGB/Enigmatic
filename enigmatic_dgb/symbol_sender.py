@@ -105,7 +105,9 @@ def send_symbol(
 
     outputs, op_returns = aggregate_spend_instructions(instructions)
     builder = TransactionBuilder(rpc)
-    txid = builder.send_payment_tx(outputs, fee, op_return_data=[data.hex() for data in op_returns])
+    txid = builder.send_payment_tx(
+        outputs, fee, op_return_data=[data.hex() for data in op_returns]
+    )
     logger.info(
         "Sent symbol %s for channel %s via txid %s", symbol_name, message.channel, txid
     )
@@ -148,4 +150,3 @@ def parse_extra_payload(extra_payload_json: str | None) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Extra payload JSON must decode to an object")
     return data
-

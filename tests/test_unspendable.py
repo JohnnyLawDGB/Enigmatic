@@ -32,7 +32,9 @@ def test_generate_address_pads_long_messages_to_base_length():
     long_message = "x" * 26
     address = generate_address("DCx", long_message)
 
-    expected_body = (f"DCx{_normalize_body(long_message)}").ljust(28, "z").ljust(34, "X")
+    expected_body = (
+        (f"DCx{_normalize_body(long_message)}").ljust(28, "z").ljust(34, "X")
+    )
     expected_payload = base58_decode(expected_body, _prefix_to_version("DCx"))
 
     prefix, message = decode_address(address)

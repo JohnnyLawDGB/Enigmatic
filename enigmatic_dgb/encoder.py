@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 from typing import Any, Iterable, Tuple
@@ -127,7 +127,9 @@ class EnigmaticEncoder:
             )
 
         logger.debug(
-            "Encoded message %s into %d instructions", message.id or str(uuid4()), len(instructions)
+            "Encoded message %s into %d instructions",
+            message.id or str(uuid4()),
+            len(instructions),
         )
         return instructions, self.config.fee_punctuation
 
@@ -160,7 +162,7 @@ class EnigmaticEncoder:
 
         message = EnigmaticMessage(
             id=str(uuid4()),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             channel=channel,
             intent=symbol.intent or "symbol",
             payload=payload,
@@ -266,11 +268,16 @@ class EnigmaticEncoder:
                 digest = hashlib.sha256(serialized_payload).hexdigest()[:16]
                 hint["payload_hash"] = digest
 
-        for keys_to_drop in (set(), {"channel"}, {"payload_hash"}, {"channel", "payload_hash"}):
+        for keys_to_drop in (
+            set(),
+            {"channel"},
+            {"payload_hash"},
+            {"channel", "payload_hash"},
+        ):
             candidate = {k: v for k, v in hint.items() if k not in keys_to_drop}
-            encoded = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
+            encoded = json.dumps(
+                candidate, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
             if len(encoded) <= 80:
                 return encoded
         return None

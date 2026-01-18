@@ -137,16 +137,26 @@ class TransactionBuilder:
                 actual_fee = funded.get("fee")
                 if actual_fee is not None and abs(actual_fee - fee) > 0.01:
                     logger.warning(
-                        "Wallet chose fee %.8f different from requested %.8f", actual_fee, fee
+                        "Wallet chose fee %.8f different from requested %.8f",
+                        actual_fee,
+                        fee,
                     )
             except RPCError as exc:
                 logger.info("fundrawtransaction unavailable or failed: %s", exc)
 
             if raw_tx is None:
                 total_output = sum(outputs.values())
-                selected_utxos, change_amount = self.utxo_manager.select_utxos(total_output, fee)
-                logger.debug("Selected %d UTXOs totaling %.8f DGB", len(selected_utxos), sum(u.amount for u in selected_utxos))
-                tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
+                selected_utxos, change_amount = self.utxo_manager.select_utxos(
+                    total_output, fee
+                )
+                logger.debug(
+                    "Selected %d UTXOs totaling %.8f DGB",
+                    len(selected_utxos),
+                    sum(u.amount for u in selected_utxos),
+                )
+                tx_inputs = [
+                    {"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos
+                ]
                 if change_amount > 1e-8:
                     change_address = self.rpc.getnewaddress()
                     outputs[change_address] = round(change_amount, 8)
@@ -168,7 +178,9 @@ class TransactionBuilder:
             actual_fee = total_in - total_out
             if abs(actual_fee - fee) > 0.01:
                 logger.warning(
-                    "Manual selection fee %.8f differs from requested %.8f", actual_fee, fee
+                    "Manual selection fee %.8f differs from requested %.8f",
+                    actual_fee,
+                    fee,
                 )
         return signed_hex
 
@@ -196,7 +208,9 @@ class TransactionBuilder:
             with the wallet's policy.
         """
 
-        logger.info("Building custom transaction with %d output entries", len(outputs_payload))
+        logger.info(
+            "Building custom transaction with %d output entries", len(outputs_payload)
+        )
 
         raw_tx: str | None = None
         formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
@@ -229,7 +243,9 @@ class TransactionBuilder:
 
         signed = self.rpc.signrawtransactionwithwallet(raw_tx)
         if not signed.get("complete"):
-            raise RuntimeError("Node failed to produce a complete signature set for inscription")
+            raise RuntimeError(
+                "Node failed to produce a complete signature set for inscription"
+            )
 
         return signed["hex"]
 
@@ -265,17 +281,23 @@ class TransactionBuilder:
         """Build and broadcast a single payment transaction with many outputs."""
 
         if not amounts:
-            raise ValueError("At least one amount is required for multi-output transactions")
+            raise ValueError(
+                "At least one amount is required for multi-output transactions"
+            )
 
         extra_log: Dict[str, Any] = {}
         if script_plane is not None:
             extra_log["script_plane"] = script_plane.to_dict()
         logger.info(
-            "Building single fan-out transaction for %d outputs", len(amounts), extra=extra_log or None
+            "Building single fan-out transaction for %d outputs",
+            len(amounts),
+            extra=extra_log or None,
         )
 
         total_output = sum(float(amount) for amount in amounts)
-        selected_utxos, change_amount = self.utxo_manager.select_utxos(total_output, fee)
+        selected_utxos, change_amount = self.utxo_manager.select_utxos(
+            total_output, fee
+        )
 
         tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
         aggregated_outputs: Dict[str, float] = {}
@@ -317,14 +339,16 @@ class TransactionBuilder:
     ) -> list[Dict[str, Any]] | Dict[str, float]:
         if not op_return_data:
             return dict(outputs)
-        payload: list[Dict[str, Any]] = [{addr: amount} for addr, amount in outputs.items()]
+        payload: list[Dict[str, Any]] = [
+            {addr: amount} for addr, amount in outputs.items()
+        ]
         for data in op_return_data:
             payload.append({"data": data})
         return payload
 
     @staticmethod
     def _format_outputs_for_rpc(
-        outputs_payload: list[Dict[str, Any]] | Dict[str, Any]
+        outputs_payload: list[Dict[str, Any]] | Dict[str, Any],
     ) -> list[Dict[str, Any]]:
         """Return outputs formatted as an array of single-key objects for RPC."""
 

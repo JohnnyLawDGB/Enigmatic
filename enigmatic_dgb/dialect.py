@@ -98,7 +98,9 @@ def load_dialect(path: str | Path) -> Dialect:
         )
         intent = payload.get("intent")
         if intent is not None and not isinstance(intent, str):
-            raise DialectError(f"Symbol {symbol_name} intent must be a string if present")
+            raise DialectError(
+                f"Symbol {symbol_name} intent must be a string if present"
+            )
         metadata = payload.get("metadata") or {}
         if not isinstance(metadata, dict):
             raise DialectError(f"Symbol {symbol_name} metadata must be a mapping")
@@ -166,4 +168,3 @@ def _require_float_list(data: dict[str, Any], key: str, error: str) -> list[floa
         except (TypeError, ValueError) as exc:
             raise DialectError(f"{error}: non-numeric value {item}") from exc
     return floats
-

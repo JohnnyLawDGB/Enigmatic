@@ -1,6 +1,10 @@
 import pytest
 
-from enigmatic_dgb.script_plane import ScriptPlane, ScriptPlaneAggregation, parse_script_plane_block
+from enigmatic_dgb.script_plane import (
+    ScriptPlane,
+    ScriptPlaneAggregation,
+    parse_script_plane_block,
+)
 
 
 def test_script_plane_roundtrip() -> None:

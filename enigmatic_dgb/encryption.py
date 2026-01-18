@@ -53,7 +53,9 @@ def _derive_key(passphrase: str, salt: bytes) -> bytes:
     return kdf.derive(passphrase.encode("utf-8"))
 
 
-def derive_key_from_passphrase(passphrase: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
+def derive_key_from_passphrase(
+    passphrase: str, salt: bytes | None = None
+) -> tuple[bytes, bytes]:
     """Derive a symmetric key using scrypt."""
 
     if salt is None:
@@ -70,7 +72,9 @@ def encrypt_payload(
 ) -> EncryptedPayload:
     """Encrypt the provided payload dictionary."""
 
-    json_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    json_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
     key, salt = derive_key_from_passphrase(passphrase)
     nonce = os.urandom(_AESGCM_NONCE_SIZE)
     aesgcm = AESGCM(key)
@@ -83,7 +87,9 @@ def encrypt_payload(
         nonce=base64.b64encode(nonce).decode("ascii"),
         ciphertext=base64.b64encode(ciphertext).decode("ascii"),
         associated_data=(
-            base64.b64encode(associated_data).decode("ascii") if associated_data else None
+            base64.b64encode(associated_data).decode("ascii")
+            if associated_data
+            else None
         ),
     )
 
@@ -104,5 +110,7 @@ def decrypt_payload(encrypted: EncryptedPayload, passphrase: str) -> dict[str, A
     try:
         plaintext = aesgcm.decrypt(nonce, ciphertext, associated_data)
     except InvalidTag as exc:  # pragma: no cover - depends on external input
-        raise ValueError("Failed to decrypt payload; invalid passphrase or data") from exc
+        raise ValueError(
+            "Failed to decrypt payload; invalid passphrase or data"
+        ) from exc
     return json.loads(plaintext.decode("utf-8"))

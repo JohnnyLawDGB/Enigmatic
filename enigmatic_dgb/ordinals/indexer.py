@@ -78,7 +78,9 @@ class OrdinalIndexer:
             yield self.rpc_client.getblock_by_height(height)
             yielded += 1
 
-    def _scan_block(self, block_json: dict, config: OrdinalScanConfig) -> List[OrdinalLocation]:
+    def _scan_block(
+        self, block_json: dict, config: OrdinalScanConfig
+    ) -> List[OrdinalLocation]:
         """Inspect a decoded block for inscription-style outputs.
 
         This placeholder walks transaction shells but intentionally performs no
@@ -99,7 +101,10 @@ class OrdinalIndexer:
                 continue
 
             for vout in tx.get("vout", []):
-                if config.limit is not None and len(candidate_locations) >= config.limit:
+                if (
+                    config.limit is not None
+                    and len(candidate_locations) >= config.limit
+                ):
                     return candidate_locations
 
                 script_pub_key = vout.get("scriptPubKey", {})
@@ -107,7 +112,10 @@ class OrdinalIndexer:
                 asm = script_pub_key.get("asm", "") or ""
                 vout_index = vout.get("n", 0)
 
-                is_op_return = script_type == "nulldata" or asm.strip().upper().startswith("OP_RETURN")
+                is_op_return = (
+                    script_type == "nulldata"
+                    or asm.strip().upper().startswith("OP_RETURN")
+                )
                 if config.include_op_return and is_op_return:
                     candidate_locations.append(
                         OrdinalLocation(
@@ -118,19 +126,26 @@ class OrdinalIndexer:
                             tags={"op_return", "inscription_candidate"},
                         )
                     )
-                    if config.limit is not None and len(candidate_locations) >= config.limit:
+                    if (
+                        config.limit is not None
+                        and len(candidate_locations) >= config.limit
+                    ):
                         return candidate_locations
 
                 if config.include_taproot_like:
                     from enigmatic_dgb.ordinals import taproot
                     from enigmatic_dgb.ordinals.inscriptions import ENIG_TAPROOT_MAGIC
 
-                    taproot_view = taproot.inspect_output_for_taproot(self.rpc_client, txid, vout_index)
+                    taproot_view = taproot.inspect_output_for_taproot(
+                        self.rpc_client, txid, vout_index
+                    )
                     if taproot_view.is_taproot_like:
                         taproot_tags = {"taproot_like", "inscription_candidate"}
                         ordinal_hint = taproot_view.script_pubkey_type or "taproot_like"
                         if taproot_view.script_pubkey_type:
-                            taproot_tags.add(f"script_type:{taproot_view.script_pubkey_type}")
+                            taproot_tags.add(
+                                f"script_type:{taproot_view.script_pubkey_type}"
+                            )
                         if taproot_view.control_block_hex:
                             taproot_tags.add("taproot_control_block_detected")
                         if taproot_view.leaf_script_hex:
@@ -146,7 +161,11 @@ class OrdinalIndexer:
                                 if magic_index != -1:
                                     ordinal_hint = "enig_taproot"
                                     taproot_tags.update(
-                                        {"taproot", "enigmatic_inscription", "taproot_v1"}
+                                        {
+                                            "taproot",
+                                            "enigmatic_inscription",
+                                            "taproot_v1",
+                                        }
                                     )
 
                         candidate_locations.append(
@@ -158,7 +177,10 @@ class OrdinalIndexer:
                                 tags=taproot_tags,
                             )
                         )
-                        if config.limit is not None and len(candidate_locations) >= config.limit:
+                        if (
+                            config.limit is not None
+                            and len(candidate_locations) >= config.limit
+                        ):
                             return candidate_locations
 
         return candidate_locations

@@ -68,14 +68,16 @@ def format_rpc_hint(error_obj: dict[str, Any] | RPCError | None) -> str | None:
             "The wallet could not fund the transaction. Fund or unlock the wallet, and consider lowering "
             "--min-confirmations if you want to spend recently received UTXOs."
         )
-    if code == -13 or "wallet passphrase" in message.lower() or "wallet locked" in message.lower():
-        return (
-            "The wallet is locked. Unlock it with walletpassphrase (or via the GUI), then retry the command."
-        )
+    if (
+        code == -13
+        or "wallet passphrase" in message.lower()
+        or "wallet locked" in message.lower()
+    ):
+        return "The wallet is locked. Unlock it with walletpassphrase (or via the GUI), then retry the command."
     if code == -8 and "key-value pair must contain exactly one key" in message:
         return (
             "createrawtransaction outputs are malformed. Each outputs entry must be an object with "
-            "exactly one key, e.g. {\"address\": amount} or {\"data\": \"hex\"}."
+            'exactly one key, e.g. {"address": amount} or {"data": "hex"}.'
         )
     if code == -5 and "Invalid DigiByte address" in message:
         return (
@@ -179,7 +181,9 @@ class DigiByteRPCClient:
             except Exception:
                 err_body = response.text
 
-            logger.error("RPC HTTP error %s from %s", response.status_code, response.url)
+            logger.error(
+                "RPC HTTP error %s from %s", response.status_code, response.url
+            )
             logger.error("RPC error body: %s", err_body)
             if response.status_code == 401:
                 raise RPCTransportError(
@@ -273,7 +277,7 @@ class DigiByteRPCClient:
 
     def getmempoolinfo(self) -> Dict[str, Any]:
         return self.call("getmempoolinfo")
-    
+
     def getmempoolentry(self, txid: str) -> Dict[str, Any]:
         return self.call("getmempoolentry", [txid])
 
@@ -320,7 +324,9 @@ class DigiByteRPCClient:
     def sendrawtransaction(self, raw_tx: str) -> str:
         return self.call("sendrawtransaction", [raw_tx])
 
-    def bumpfee(self, txid: str, options: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def bumpfee(
+        self, txid: str, options: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         params: list[Any] = [txid]
         if options is not None:
             params.append(options)

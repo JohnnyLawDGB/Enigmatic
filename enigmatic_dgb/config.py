@@ -57,7 +57,9 @@ def _load_config_file(path: Path, *, required: bool) -> dict[str, Any]:
         raise ConfigurationError(f"Invalid YAML in config file {path}: {exc}") from exc
 
     if not isinstance(loaded, dict):
-        raise ConfigurationError(f"Expected {path} to contain a YAML object with an 'rpc' section")
+        raise ConfigurationError(
+            f"Expected {path} to contain a YAML object with an 'rpc' section"
+        )
     return loaded
 
 
@@ -125,7 +127,9 @@ def load_rpc_config(
 
     for candidate in config_candidates:
         loaded_path = candidate
-        file_config = _load_config_file(candidate, required=explicit_path and candidate == path)
+        file_config = _load_config_file(
+            candidate, required=explicit_path and candidate == path
+        )
         if file_config or candidate.exists():
             break
 
@@ -136,25 +140,35 @@ def load_rpc_config(
     override_map = dict(overrides or {})
 
     env_user = env_map.get("DGB_RPC_USER") or env_map.get("ENIGMATIC_DGB_RPC_USER")
-    env_password = env_map.get("DGB_RPC_PASSWORD") or env_map.get("ENIGMATIC_DGB_RPC_PASSWORD")
+    env_password = env_map.get("DGB_RPC_PASSWORD") or env_map.get(
+        "ENIGMATIC_DGB_RPC_PASSWORD"
+    )
     env_host = env_map.get("DGB_RPC_HOST") or env_map.get("ENIGMATIC_DGB_RPC_HOST")
     env_port = _coerce_port(
         env_map.get("DGB_RPC_PORT") or env_map.get("ENIGMATIC_DGB_RPC_PORT"),
         source="environment",
     )
-    env_wallet = env_map.get("DGB_RPC_WALLET") or env_map.get("ENIGMATIC_DGB_RPC_WALLET")
+    env_wallet = env_map.get("DGB_RPC_WALLET") or env_map.get(
+        "ENIGMATIC_DGB_RPC_WALLET"
+    )
     env_use_https = _coerce_bool(
         env_map.get("DGB_RPC_USE_HTTPS") or env_map.get("ENIGMATIC_DGB_RPC_USE_HTTPS")
     )
     env_endpoint = env_map.get("DGB_RPC_ENDPOINT") or env_map.get("DGB_RPC_URL")
     if not env_endpoint:
-        env_endpoint = env_map.get("ENIGMATIC_DGB_RPC_ENDPOINT") or env_map.get("ENIGMATIC_DGB_RPC_URL")
+        env_endpoint = env_map.get("ENIGMATIC_DGB_RPC_ENDPOINT") or env_map.get(
+            "ENIGMATIC_DGB_RPC_URL"
+        )
 
     endpoint_host, endpoint_port, endpoint_use_https = _parse_endpoint(
-        _first_value(override_map.get("endpoint"), env_endpoint, rpc_section.get("endpoint"))
+        _first_value(
+            override_map.get("endpoint"), env_endpoint, rpc_section.get("endpoint")
+        )
     )
 
-    resolved_user = _first_value(override_map.get("user"), env_user, rpc_section.get("user"))
+    resolved_user = _first_value(
+        override_map.get("user"), env_user, rpc_section.get("user")
+    )
     resolved_password = _first_value(
         override_map.get("password"), env_password, rpc_section.get("password")
     )
@@ -164,15 +178,21 @@ def load_rpc_config(
         )
 
     resolved_host = _first_value(
-        override_map.get("host"), endpoint_host, env_host, rpc_section.get("host"), "127.0.0.1"
+        override_map.get("host"),
+        endpoint_host,
+        env_host,
+        rpc_section.get("host"),
+        "127.0.0.1",
     )
     resolved_port = _first_value(
         _coerce_port(override_map.get("port"), source="overrides"),
         _coerce_port(endpoint_port, source="endpoint"),
         env_port,
-        _coerce_port(rpc_section.get("port"), source=f"{loaded_path} rpc.port")
-        if rpc_section.get("port") is not None
-        else None,
+        (
+            _coerce_port(rpc_section.get("port"), source=f"{loaded_path} rpc.port")
+            if rpc_section.get("port") is not None
+            else None
+        ),
         14022,
     )
     resolved_use_https = _first_value(

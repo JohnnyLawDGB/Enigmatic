@@ -18,7 +18,9 @@ from cryptography.hazmat.backends import default_backend
 
 # BIP340/341 constants
 SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-SECP256K1_FIELD_SIZE = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+SECP256K1_FIELD_SIZE = (
+    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+)
 
 # Default internal key for inscriptions (unspendable)
 # This is a pre-computed valid x-coordinate derived from SHA256("enigmatic-dgb-inscriptions")
@@ -66,14 +68,14 @@ def ser_compact_size(n: int) -> bytes:
     if n < 253:
         return bytes([n])
     elif n <= 0xFFFF:
-        return b'\xfd' + n.to_bytes(2, 'little')
+        return b"\xfd" + n.to_bytes(2, "little")
     elif n <= 0xFFFFFFFF:
-        return b'\xfe' + n.to_bytes(4, 'little')
+        return b"\xfe" + n.to_bytes(4, "little")
     else:
-        return b'\xff' + n.to_bytes(8, 'little')
+        return b"\xff" + n.to_bytes(8, "little")
 
 
-def taproot_leaf_hash(leaf_script: bytes, leaf_version: int = 0xc0) -> bytes:
+def taproot_leaf_hash(leaf_script: bytes, leaf_version: int = 0xC0) -> bytes:
     """Compute TapLeaf hash for a single script leaf.
 
     Args:
@@ -88,7 +90,7 @@ def taproot_leaf_hash(leaf_script: bytes, leaf_version: int = 0xc0) -> bytes:
     """
     return tagged_hash(
         "TapLeaf",
-        bytes([leaf_version]) + ser_compact_size(len(leaf_script)) + leaf_script
+        bytes([leaf_version]) + ser_compact_size(len(leaf_script)) + leaf_script,
     )
 
 
@@ -119,7 +121,7 @@ def taproot_tweak_pubkey(internal_key: bytes, merkle_root: bytes) -> Tuple[bytes
     # Compute tweak: t = tagged_hash("TapTweak", internal_key || merkle_root)
     tweak_data = internal_key + merkle_root
     tweak_hash = tagged_hash("TapTweak", tweak_data)
-    tweak_int = int.from_bytes(tweak_hash, 'big')
+    tweak_int = int.from_bytes(tweak_hash, "big")
 
     # Ensure tweak is valid (less than curve order)
     if tweak_int >= SECP256K1_ORDER:
@@ -144,7 +146,7 @@ def taproot_tweak_pubkey(internal_key: bytes, merkle_root: bytes) -> Tuple[bytes
         raise ValueError(f"Point addition failed: {exc}") from exc
 
     # Extract x-coordinate and parity
-    tweaked_x = tweaked_point.x.to_bytes(32, 'big')
+    tweaked_x = tweaked_point.x.to_bytes(32, "big")
     parity = tweaked_point.y % 2
 
     return tweaked_x, parity
@@ -162,7 +164,7 @@ def _point_from_xonly(x_bytes: bytes) -> ec.EllipticCurvePublicNumbers:
     Raises:
         ValueError: If x-coordinate is invalid
     """
-    x = int.from_bytes(x_bytes, 'big')
+    x = int.from_bytes(x_bytes, "big")
 
     if x >= SECP256K1_FIELD_SIZE:
         raise ValueError("x-coordinate exceeds field size")
@@ -184,7 +186,9 @@ def _point_from_xonly(x_bytes: bytes) -> ec.EllipticCurvePublicNumbers:
     return ec.EllipticCurvePublicNumbers(x, y, ec.SECP256K1())
 
 
-def _point_add(p1: ec.EllipticCurvePublicNumbers, p2: ec.EllipticCurvePublicNumbers) -> ec.EllipticCurvePublicNumbers:
+def _point_add(
+    p1: ec.EllipticCurvePublicNumbers, p2: ec.EllipticCurvePublicNumbers
+) -> ec.EllipticCurvePublicNumbers:
     """Add two secp256k1 points.
 
     Args:
@@ -225,8 +229,7 @@ def _point_add(p1: ec.EllipticCurvePublicNumbers, p2: ec.EllipticCurvePublicNumb
 
 
 def compute_taproot_output_from_script(
-    leaf_script: bytes,
-    internal_key: bytes | None = None
+    leaf_script: bytes, internal_key: bytes | None = None
 ) -> dict:
     """Compute Taproot output details from a leaf script.
 
@@ -274,7 +277,7 @@ def compute_taproot_output_from_script(
 
     # Build control block: <leaf_version + parity> <internal_key> [merkle_path]
     # For single leaf: just version+parity and internal key (no merkle path)
-    leaf_version = 0xc0
+    leaf_version = 0xC0
     control_byte = leaf_version | parity
     control_block = bytes([control_byte]) + internal_key
 
@@ -291,11 +294,11 @@ def compute_taproot_output_from_script(
 
 def bech32_polymod(values: list[int]) -> int:
     """Compute bech32 checksum polymod."""
-    GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+    GEN = [0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3]
     chk = 1
     for value in values:
         b = chk >> 25
-        chk = (chk & 0x1ffffff) << 5 ^ value
+        chk = (chk & 0x1FFFFFF) << 5 ^ value
         for i in range(5):
             chk ^= GEN[i] if ((b >> i) & 1) else 0
     return chk
@@ -318,7 +321,7 @@ def bech32_create_checksum(hrp: str, data: list[int], spec: str) -> list[int]:
         Checksum values (6 elements)
     """
     values = bech32_hrp_expand(hrp) + data
-    const = 0x2bc830a3 if spec == 'bech32m' else 1  # BIP350 constant for bech32m
+    const = 0x2BC830A3 if spec == "bech32m" else 1  # BIP350 constant for bech32m
     polymod = bech32_polymod(values + [0, 0, 0, 0, 0, 0]) ^ const
     return [(polymod >> 5 * (5 - i)) & 31 for i in range(6)]
 
@@ -338,7 +341,7 @@ def bech32_encode(hrp: str, witver: int, witprog: bytes) -> str:
         BIP173 (bech32): https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki
         BIP350 (bech32m): https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
     """
-    spec = 'bech32m' if witver >= 1 else 'bech32'
+    spec = "bech32m" if witver >= 1 else "bech32"
 
     # Convert 8-bit to 5-bit
     data = _convertbits(witprog, 8, 5)
@@ -353,10 +356,12 @@ def bech32_encode(hrp: str, witver: int, witprog: bytes) -> str:
 
     # Encode to characters
     CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-    return hrp + '1' + ''.join([CHARSET[d] for d in combined + checksum])
+    return hrp + "1" + "".join([CHARSET[d] for d in combined + checksum])
 
 
-def _convertbits(data: bytes, frombits: int, tobits: int, pad: bool = True) -> list[int] | None:
+def _convertbits(
+    data: bytes, frombits: int, tobits: int, pad: bool = True
+) -> list[int] | None:
     """Convert between bit groups.
 
     Args:

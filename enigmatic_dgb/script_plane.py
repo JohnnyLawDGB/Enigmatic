@@ -31,7 +31,8 @@ class ScriptPlaneAggregation:
 
     def is_default(self) -> bool:
         return self.aggregation_mode == "none" and not any(
-            value is not None for value in (self.signer_set_id, self.threshold, self.total_signers)
+            value is not None
+            for value in (self.signer_set_id, self.threshold, self.total_signers)
         )
 
 
@@ -112,7 +113,9 @@ def _parse_aggregation_block(
         try:
             threshold = int(threshold)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-            raise error_factory("script_plane.aggregation.threshold must be an integer") from exc
+            raise error_factory(
+                "script_plane.aggregation.threshold must be an integer"
+            ) from exc
         if threshold <= 0:
             raise error_factory("script_plane.aggregation.threshold must be positive")
 
@@ -121,12 +124,22 @@ def _parse_aggregation_block(
         try:
             total_signers = int(total_signers)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-            raise error_factory("script_plane.aggregation.total_signers must be an integer") from exc
+            raise error_factory(
+                "script_plane.aggregation.total_signers must be an integer"
+            ) from exc
         if total_signers <= 0:
-            raise error_factory("script_plane.aggregation.total_signers must be positive")
+            raise error_factory(
+                "script_plane.aggregation.total_signers must be positive"
+            )
 
-    if threshold is not None and total_signers is not None and threshold > total_signers:
-        raise error_factory("script_plane.aggregation.threshold cannot exceed total_signers")
+    if (
+        threshold is not None
+        and total_signers is not None
+        and threshold > total_signers
+    ):
+        raise error_factory(
+            "script_plane.aggregation.threshold cannot exceed total_signers"
+        )
 
     return ScriptPlaneAggregation(
         aggregation_mode=aggregation_mode,

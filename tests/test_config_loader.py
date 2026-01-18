@@ -39,7 +39,9 @@ def test_load_rpc_config_prefers_environment_over_yaml(tmp_path: Path) -> None:
     assert config.wallet == "envwallet"
 
 
-def test_load_rpc_config_reads_yaml_when_env_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_rpc_config_reads_yaml_when_env_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_dir = tmp_path / ".enigmatic"
     config_dir.mkdir()
     config_path = config_dir / "config.yaml"

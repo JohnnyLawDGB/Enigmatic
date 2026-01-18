@@ -11,7 +11,9 @@ from enigmatic_dgb.fees import (
 
 
 class StubRPC:
-    def __init__(self, estimate_rate: float | None = None, mempool_min: float | None = None) -> None:
+    def __init__(
+        self, estimate_rate: float | None = None, mempool_min: float | None = None
+    ) -> None:
         self.estimate_rate = estimate_rate
         self.mempool_min = mempool_min
 

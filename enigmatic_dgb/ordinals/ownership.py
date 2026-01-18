@@ -5,8 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Iterable, List, Sequence, Set
 
-from enigmatic_dgb.ordinals.indexer import OrdinalIndexer, OrdinalLocation, OrdinalScanConfig
-from enigmatic_dgb.ordinals.inscriptions import InscriptionPayload, OrdinalInscriptionDecoder
+from enigmatic_dgb.ordinals.indexer import (
+    OrdinalIndexer,
+    OrdinalLocation,
+    OrdinalScanConfig,
+)
+from enigmatic_dgb.ordinals.inscriptions import (
+    InscriptionPayload,
+    OrdinalInscriptionDecoder,
+)
 from enigmatic_dgb.rpc_client import DigiByteRPCClient
 
 logger = logging.getLogger(__name__)
@@ -38,11 +45,16 @@ class OrdinalOwnershipView:
         return addresses
 
     def _filter_locations_by_address(
-        self, block_json: dict, locations: Sequence[OrdinalLocation], address_set: Set[str]
+        self,
+        block_json: dict,
+        locations: Sequence[OrdinalLocation],
+        address_set: Set[str],
     ) -> List[OrdinalLocation]:
         if not locations:
             return []
-        tx_lookup = {tx.get("txid") or tx.get("hash"): tx for tx in block_json.get("tx", [])}
+        tx_lookup = {
+            tx.get("txid") or tx.get("hash"): tx for tx in block_json.get("tx", [])
+        }
         matched: List[OrdinalLocation] = []
         for location in locations:
             tx = tx_lookup.get(location.txid)
@@ -82,7 +94,9 @@ class OrdinalOwnershipView:
             if config.limit is not None and len(results) >= config.limit:
                 break
             candidate_locations = self.indexer._scan_block(block_json, config)
-            address_filtered = self._filter_locations_by_address(block_json, candidate_locations, address_set)
+            address_filtered = self._filter_locations_by_address(
+                block_json, candidate_locations, address_set
+            )
             for location in address_filtered:
                 if config.limit is not None and len(results) >= config.limit:
                     break
@@ -103,9 +117,13 @@ class OrdinalOwnershipView:
         self.rpc_client.set_wallet(wallet_name)
         try:
             utxos = self.rpc_client.listunspent()
-            wallet_addresses = sorted({u.get("address") for u in utxos if u.get("address")})
+            wallet_addresses = sorted(
+                {u.get("address") for u in utxos if u.get("address")}
+            )
         finally:
             # Restore the previous wallet context to avoid surprising callers.
             self.rpc_client.set_wallet(original_wallet)
 
-        return self.find_inscriptions_for_addresses(wallet_addresses, scan_config=scan_config)
+        return self.find_inscriptions_for_addresses(
+            wallet_addresses, scan_config=scan_config
+        )

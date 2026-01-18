@@ -63,7 +63,9 @@ class DTSPEncodingError(ValueError):
     """Raised when DTSP encoding or decoding fails."""
 
 
-def closest_dtsp_symbol(value: float, tolerance: float = DTSP_TOLERANCE) -> Tuple[str | None, float]:
+def closest_dtsp_symbol(
+    value: float, tolerance: float = DTSP_TOLERANCE
+) -> Tuple[str | None, float]:
     """Return the closest DTSP symbol for ``value``.
 
     Parameters
@@ -111,7 +113,9 @@ def encode_handshake_end() -> float:
     return DTSP_CONTROL["END"]
 
 
-def encode_message_to_dtsp_sequence(message: str, include_start_end: bool = True) -> List[float]:
+def encode_message_to_dtsp_sequence(
+    message: str, include_start_end: bool = True
+) -> List[float]:
     """Encode ``message`` into an ordered list of DTSP floats.
 
     Lowercase letters are normalized to uppercase. Unknown characters raise a

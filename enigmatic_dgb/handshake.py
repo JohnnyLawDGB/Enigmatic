@@ -158,7 +158,9 @@ def derive_session_key(shared_secret: bytes, params: HandshakeParameters) -> byt
     return hkdf.derive(shared_secret)
 
 
-def build_handshake_payload(state: HandshakeState, include_mac: bool = False) -> dict[str, Any]:
+def build_handshake_payload(
+    state: HandshakeState, include_mac: bool = False
+) -> dict[str, Any]:
     """Build a serializable payload describing the handshake state."""
 
     payload: dict[str, Any] = {
@@ -180,7 +182,15 @@ def build_handshake_payload(state: HandshakeState, include_mac: bool = False) ->
 def parse_handshake_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize a handshake payload dictionary."""
 
-    required_fields = {"type", "version", "session_id", "phase", "dialect", "channel", "public_key"}
+    required_fields = {
+        "type",
+        "version",
+        "session_id",
+        "phase",
+        "dialect",
+        "channel",
+        "public_key",
+    }
     missing = required_fields - payload.keys()
     if missing:
         raise ValueError(f"Handshake payload missing fields: {sorted(missing)}")
@@ -249,22 +259,32 @@ def responder_process_init_and_build_resp(
     parsed = parse_handshake_payload(init_payload)
     if parsed["session_id"] != responder_state.params.session_id:
         raise ValueError("Session mismatch between init payload and responder state")
-    if parsed["channel"] != responder_state.params.channel or parsed["dialect"] != responder_state.params.dialect:
+    if (
+        parsed["channel"] != responder_state.params.channel
+        or parsed["dialect"] != responder_state.params.dialect
+    ):
         raise ValueError("Channel or dialect mismatch in init payload")
 
     responder_state.remote_public_key = parsed["public_key"]
     shared_secret = _compute_shared_secret(responder_state, parsed["public_key"])
     responder_state.shared_secret = shared_secret
-    responder_state.session_key = derive_session_key(shared_secret, responder_state.params)
+    responder_state.session_key = derive_session_key(
+        shared_secret, responder_state.params
+    )
     responder_state.phase = HandshakePhase.COMPLETE
     logger.info(
         "Responder completed handshake",
-        extra={"channel": responder_state.params.channel, "session_id": responder_state.params.session_id},
+        extra={
+            "channel": responder_state.params.channel,
+            "session_id": responder_state.params.session_id,
+        },
     )
     return build_handshake_payload(responder_state)
 
 
-def initiator_process_resp(initiator_state: HandshakeState, resp_payload: dict[str, Any]) -> None:
+def initiator_process_resp(
+    initiator_state: HandshakeState, resp_payload: dict[str, Any]
+) -> None:
     """Process the RESP payload and finalize the initiator state."""
 
     if initiator_state.role is not HandshakeRole.INITIATOR:
@@ -273,17 +293,25 @@ def initiator_process_resp(initiator_state: HandshakeState, resp_payload: dict[s
     parsed = parse_handshake_payload(resp_payload)
     if parsed["session_id"] != initiator_state.params.session_id:
         raise ValueError("Session mismatch between resp payload and initiator state")
-    if parsed["channel"] != initiator_state.params.channel or parsed["dialect"] != initiator_state.params.dialect:
+    if (
+        parsed["channel"] != initiator_state.params.channel
+        or parsed["dialect"] != initiator_state.params.dialect
+    ):
         raise ValueError("Channel or dialect mismatch in resp payload")
 
     initiator_state.remote_public_key = parsed["public_key"]
     shared_secret = _compute_shared_secret(initiator_state, parsed["public_key"])
     initiator_state.shared_secret = shared_secret
-    initiator_state.session_key = derive_session_key(shared_secret, initiator_state.params)
+    initiator_state.session_key = derive_session_key(
+        shared_secret, initiator_state.params
+    )
     initiator_state.phase = HandshakePhase.COMPLETE
     logger.info(
         "Initiator completed handshake",
-        extra={"channel": initiator_state.params.channel, "session_id": initiator_state.params.session_id},
+        extra={
+            "channel": initiator_state.params.channel,
+            "session_id": initiator_state.params.session_id,
+        },
     )
 
 
@@ -300,7 +328,9 @@ def create_handshake_init_message(state: HandshakeState) -> EnigmaticMessage:
     )
 
 
-def create_handshake_resp_message(state: HandshakeState, resp_payload: dict[str, Any]) -> EnigmaticMessage:
+def create_handshake_resp_message(
+    state: HandshakeState, resp_payload: dict[str, Any]
+) -> EnigmaticMessage:
     """Wrap a responder payload in an EnigmaticMessage container."""
 
     return EnigmaticMessage(
@@ -324,4 +354,3 @@ def make_session_context_from_handshake(state: HandshakeState) -> SessionContext
         created_at=state.params.created_at,
         session_key=state.session_key,
     )
-

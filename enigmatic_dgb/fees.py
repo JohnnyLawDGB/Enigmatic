@@ -56,7 +56,9 @@ class FeeSelectionResult:
         )
 
 
-def _extract_estimate_rate(estimate_resp: Dict[str, Any]) -> Tuple[float | None, str | None]:
+def _extract_estimate_rate(
+    estimate_resp: Dict[str, Any],
+) -> Tuple[float | None, str | None]:
     """Return a sat/vB fee rate from an estimatesmartfee-style response."""
 
     if not estimate_resp:
@@ -77,7 +79,9 @@ def _extract_estimate_rate(estimate_resp: Dict[str, Any]) -> Tuple[float | None,
     return parsed, "sat/vb"
 
 
-def _policy_floor_from_rpc(rpc_client: Any) -> Tuple[float | None, list[Tuple[str, float]]]:
+def _policy_floor_from_rpc(
+    rpc_client: Any,
+) -> Tuple[float | None, list[Tuple[str, float]]]:
     """Return policy fee floors (sat/vB) derived from node state."""
 
     floors: list[Tuple[str, float]] = []
@@ -160,7 +164,9 @@ def select_fee_rate(
     floor_value = None
     if floor_candidates:
         floor_value = max(rate for _, rate in floor_candidates)
-        floors_applied = [(label, rate) for label, rate in floor_candidates if rate == floor_value]
+        floors_applied = [
+            (label, rate) for label, rate in floor_candidates if rate == floor_value
+        ]
 
     fee_rate = None
     source = "unknown"
@@ -196,9 +202,7 @@ def select_fee_rate(
         source = "fallback"
 
     if floor_value is not None and fee_rate < floor_value:
-        logger.debug(
-            "Applying fee floor %.2f sat/vB over %s", floor_value, fee_rate
-        )
+        logger.debug("Applying fee floor %.2f sat/vB over %s", floor_value, fee_rate)
         fee_rate = floor_value
 
     selection = FeeSelectionResult(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from enigmatic_dgb.decoder import EnigmaticDecoder, ObservedTx, group_into_packets
 from enigmatic_dgb.encoder import EnigmaticEncoder
@@ -15,7 +15,7 @@ def test_identity_round_trip() -> None:
     config = EncodingConfig.enigmatic_default()
     message = EnigmaticMessage(
         id="test",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         channel="default",
         intent="identity",
         payload={"role": "handshake"},
@@ -27,7 +27,7 @@ def test_identity_round_trip() -> None:
     packet = [
         ObservedTx(
             txid=f"tx-{idx}",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             amount=instruction.amount,
             fee=fee if idx == len(instructions) - 1 else None,
         )
@@ -43,13 +43,14 @@ def test_identity_round_trip() -> None:
 
 def test_group_into_packets_respects_time_gaps() -> None:
     config = EncodingConfig.enigmatic_default()
-    base_time = datetime.utcnow()
+    base_time = datetime.now(timezone.utc)
     txs = [
         ObservedTx(txid="a", timestamp=base_time, amount=217.0),
         ObservedTx(txid="b", timestamp=base_time + timedelta(seconds=10), amount=0.076),
         ObservedTx(
             txid="c",
-            timestamp=base_time + timedelta(seconds=config.packet_max_interval_seconds + 10),
+            timestamp=base_time
+            + timedelta(seconds=config.packet_max_interval_seconds + 10),
             amount=352.0,
         ),
     ]
@@ -64,7 +65,7 @@ def test_encoder_emits_op_return_hint() -> None:
     config = EncodingConfig.enigmatic_default()
     message = EnigmaticMessage(
         id="test",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         channel="default",
         intent="identity",
         payload={"role": "handshake"},
@@ -82,7 +83,7 @@ def test_decoder_includes_op_return_hint() -> None:
     packet = [
         ObservedTx(
             txid="hint",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             amount=config.anchor_amounts[0],
             op_return_data=hint,
         )
@@ -99,7 +100,10 @@ def test_decoder_emits_script_plane_metadata() -> None:
     plane = ScriptPlane(script_type="p2tr", taproot_mode="script_path", branch_id=11)
     packet = [
         ObservedTx(
-            txid="tp", timestamp=datetime.utcnow(), amount=config.anchor_amounts[0], script_plane=plane
+            txid="tp",
+            timestamp=datetime.now(timezone.utc),
+            amount=config.anchor_amounts[0],
+            script_plane=plane,
         )
     ]
     message = decoder.decode_packet(packet, channel="default")

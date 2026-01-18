@@ -109,6 +109,7 @@ def decode_enig_taproot_payload(data: bytes) -> Tuple[int, str, bytes]:
 
     return version, content_type, payload_bytes
 
+
 from enigmatic_dgb.ordinals.indexer import OrdinalIndexer, OrdinalLocation
 
 
@@ -163,9 +164,13 @@ class OrdinalInscriptionDecoder:
         tx = self.rpc_client.getrawtransaction(txid, verbose=True)
         indexer = OrdinalIndexer(self.rpc_client)
         locations = indexer.scan_tx(txid)
-        return _extract_candidate_payloads_from_tx(tx, locations, rpc_client=self.rpc_client)
+        return _extract_candidate_payloads_from_tx(
+            tx, locations, rpc_client=self.rpc_client
+        )
 
-    def decode_from_location(self, location: OrdinalLocation) -> Optional[InscriptionPayload]:
+    def decode_from_location(
+        self, location: OrdinalLocation
+    ) -> Optional[InscriptionPayload]:
         """Decode a specific output location for inscription-style data.
 
         The default behavior fetches the transaction and scans it for candidate
@@ -449,7 +454,9 @@ def _extract_candidate_payloads_from_tx(
                 logger.debug("Non-hex data in OP_RETURN payload for %s", location)
                 continue
 
-            decoded_text = raw_bytes.decode("utf-8", errors="replace") if raw_bytes else ""
+            decoded_text = (
+                raw_bytes.decode("utf-8", errors="replace") if raw_bytes else ""
+            )
             decoded_json: Optional[Dict[str, Any]] = None
             if decoded_text:
                 try:
@@ -493,14 +500,21 @@ def _extract_candidate_payloads_from_tx(
                 InscriptionPayload(
                     metadata=metadata,
                     raw_payload=witness_bytes,
-                    decoded_text=witness_bytes.decode("utf-8", errors="replace") if witness_bytes else "",
+                    decoded_text=(
+                        witness_bytes.decode("utf-8", errors="replace")
+                        if witness_bytes
+                        else ""
+                    ),
                     decoded_json=None,
                 )
             )
 
         elif location.ordinal_hint == "enig_taproot":
             if rpc_client is None:
-                logger.debug("RPC client unavailable; cannot inspect taproot view for %s", location)
+                logger.debug(
+                    "RPC client unavailable; cannot inspect taproot view for %s",
+                    location,
+                )
                 continue
 
             try:
@@ -510,12 +524,16 @@ def _extract_candidate_payloads_from_tx(
                     rpc_client, location.txid, location.vout
                 )
             except Exception:  # pragma: no cover - defensive against RPC hiccups
-                logger.debug("Taproot inspection failed for %s", location, exc_info=True)
+                logger.debug(
+                    "Taproot inspection failed for %s", location, exc_info=True
+                )
                 continue
 
             leaf_hex = taproot_view.leaf_script_hex if taproot_view else None
             if not leaf_hex:
-                logger.debug("No leaf script present for Enigmatic taproot location %s", location)
+                logger.debug(
+                    "No leaf script present for Enigmatic taproot location %s", location
+                )
                 continue
 
             try:
@@ -531,9 +549,15 @@ def _extract_candidate_payloads_from_tx(
 
             envelope = leaf_bytes[magic_index:]
             try:
-                version, content_type, payload_bytes = decode_enig_taproot_payload(envelope)
+                version, content_type, payload_bytes = decode_enig_taproot_payload(
+                    envelope
+                )
             except ValueError:
-                logger.debug("Failed to decode Enigmatic taproot payload for %s", location, exc_info=True)
+                logger.debug(
+                    "Failed to decode Enigmatic taproot payload for %s",
+                    location,
+                    exc_info=True,
+                )
                 continue
 
             decoded_text: Optional[str] = None
@@ -542,7 +566,11 @@ def _extract_candidate_payloads_from_tx(
                 or content_type == "application/json"
                 or content_type.endswith("+json")
             ):
-                decoded_text = payload_bytes.decode("utf-8", errors="replace") if payload_bytes else ""
+                decoded_text = (
+                    payload_bytes.decode("utf-8", errors="replace")
+                    if payload_bytes
+                    else ""
+                )
 
             decoded_json: Optional[Dict[str, Any]] = None
             if content_type == "application/json" and decoded_text:

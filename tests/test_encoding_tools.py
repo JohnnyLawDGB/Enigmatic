@@ -42,12 +42,16 @@ def test_dtsp_rejects_unknown_characters():
 
 
 def test_binary_packet_roundtrip():
-    packets = encode_text_to_binary_packets("Hi", base_amount=Decimal("0"), bits_per_char=8)
+    packets = encode_text_to_binary_packets(
+        "Hi", base_amount=Decimal("0"), bits_per_char=8
+    )
     assert packets[0].bits == "01001000"
     assert packets[1].bits == "01101001"
     amounts = [packet.amount for packet in packets]
     assert amounts == [Decimal("0.01001000"), Decimal("0.01101001")]
-    decoded = decode_binary_packets_to_text(amounts, base_amount=Decimal("0"), bits_per_char=8)
+    decoded = decode_binary_packets_to_text(
+        amounts, base_amount=Decimal("0"), bits_per_char=8
+    )
     assert decoded == "Hi"
 
 

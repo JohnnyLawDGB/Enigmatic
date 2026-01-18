@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -54,7 +54,7 @@ def test_decrypt_payload_rejects_wrong_passphrase() -> None:
 def test_message_helpers_encrypt_and_decrypt() -> None:
     message = EnigmaticMessage(
         id="msg-1",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         channel="ops",
         intent="presence",
         payload={"note": "classified"},
@@ -66,7 +66,9 @@ def test_message_helpers_encrypt_and_decrypt() -> None:
     assert encrypted_message.encrypted is True
     assert "encrypted" in encrypted_message.payload
 
-    decrypted_payload = message_decrypt_payload(encrypted_message, passphrase="passphrase")
+    decrypted_payload = message_decrypt_payload(
+        encrypted_message, passphrase="passphrase"
+    )
     assert decrypted_payload == {"note": "classified"}
 
 
@@ -74,7 +76,7 @@ def test_message_decrypt_payload_plaintext_passthrough() -> None:
     payload = {"flag": False}
     message = EnigmaticMessage(
         id="plain",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         channel="ops",
         intent="identity",
         payload=payload,

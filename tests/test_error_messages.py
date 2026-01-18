@@ -84,4 +84,7 @@ def test_prepare_inscription_surfaces_rpc_hint(monkeypatch):
 
     message = str(excinfo.value)
     assert "Broadcast failed" in message
-    assert "Hint: The node rejected the transaction because the fee is below its minrelaytxfee policy." in message
+    assert (
+        "Hint: The node rejected the transaction because the fee is below its minrelaytxfee policy."
+        in message
+    )

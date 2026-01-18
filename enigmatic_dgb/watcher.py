@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Sequence, Set
 
 from .decoder import EnigmaticDecoder, ObservedTx, group_into_packets
@@ -56,7 +56,9 @@ class Watcher:
             for packet in packets:
                 try:
                     message = self.decoder.decode_packet(packet, address)
-                except Exception:  # pragma: no cover - decoding errors should not stop loop
+                except (
+                    Exception
+                ):  # pragma: no cover - decoding errors should not stop loop
                     logger.exception("Failed to decode packet for %s", address)
                     continue
                 messages.append(message)
@@ -117,7 +119,7 @@ class Watcher:
             observed.append(
                 ObservedTx(
                     txid=str(txid),
-                    timestamp=datetime.utcfromtimestamp(int(timestamp)),
+                    timestamp=datetime.fromtimestamp(int(timestamp), timezone.utc),
                     amount=abs(float(entry.get("amount", 0.0))),
                     fee=(
                         abs(float(entry.get("fee")))

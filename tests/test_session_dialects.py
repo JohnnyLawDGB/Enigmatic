@@ -1,6 +1,6 @@
 """Tests covering session-aware dialect behavior for the symbol sender."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -48,7 +48,7 @@ def encoder_stub(monkeypatch):
             DummyEncoder.last_passphrase = encrypt_with_passphrase
             message = EnigmaticMessage(
                 id="msg",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 channel=channel,
                 intent="test",
                 payload={},
@@ -79,7 +79,12 @@ def sample_dialect():
         requires_session=True,
         session_scope="channel",
     )
-    return Dialect(name="test", description="desc", symbols={symbol.name: symbol}, fee_punctuation=0.1)
+    return Dialect(
+        name="test",
+        description="desc",
+        symbols={symbol.name: symbol},
+        fee_punctuation=0.1,
+    )
 
 
 def test_symbol_requires_session(sample_dialect, encoder_stub):
@@ -95,7 +100,7 @@ def test_symbol_with_session(sample_dialect, encoder_stub):
         session_id="abc",
         channel="default",
         dialect="test",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         session_key=session_key,
     )
     txids = send_symbol(rpc, sample_dialect, "SECURE", "addr", session=session)
@@ -127,7 +132,7 @@ def test_symbol_without_session_requirement(encoder_stub):
         session_id="xyz",
         channel="default",
         dialect="test",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         session_key=b"1" * 32,
     )
     assert send_symbol(rpc, dialect, "OPEN", "addr", session=session) == ["tx-dummy"]

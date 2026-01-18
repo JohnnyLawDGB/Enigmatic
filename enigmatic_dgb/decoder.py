@@ -27,7 +27,9 @@ class ObservedTx:
     address: str | None = None
 
 
-def group_into_packets(txs: List[ObservedTx], config: EncodingConfig) -> List[List[ObservedTx]]:
+def group_into_packets(
+    txs: List[ObservedTx], config: EncodingConfig
+) -> List[List[ObservedTx]]:
     """Group sorted transactions into packets based on time gaps."""
 
     if not txs:
@@ -72,11 +74,15 @@ class EnigmaticDecoder:
             payload["punctuation"] = True
         script_planes = [tx.script_plane.to_dict() for tx in packet if tx.script_plane]
         if script_planes:
-            payload["script_plane"] = script_planes[0] if len(script_planes) == 1 else script_planes
+            payload["script_plane"] = (
+                script_planes[0] if len(script_planes) == 1 else script_planes
+            )
 
         op_return_hints = self._op_return_metadata(packet)
         if op_return_hints:
-            payload["op_return"] = op_return_hints[0] if len(op_return_hints) == 1 else op_return_hints
+            payload["op_return"] = (
+                op_return_hints[0] if len(op_return_hints) == 1 else op_return_hints
+            )
 
         message = EnigmaticMessage(
             id=str(uuid.uuid4()),

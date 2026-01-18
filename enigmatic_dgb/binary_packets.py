@@ -41,7 +41,7 @@ def encode_text_to_binary_packets(
 
     for letter in text:
         codepoint = ord(letter)
-        if codepoint >= 2 ** bits_per_char:
+        if codepoint >= 2**bits_per_char:
             raise BinaryEncodingError(
                 f"letter '{letter}' cannot be represented with {bits_per_char} bits"
             )
@@ -54,7 +54,10 @@ def encode_text_to_binary_packets(
 
 
 def decode_binary_packets_to_text(
-    amounts: Sequence[Decimal], *, base_amount: Decimal = Decimal("0.0001"), bits_per_char: int = 8
+    amounts: Sequence[Decimal],
+    *,
+    base_amount: Decimal = Decimal("0.0001"),
+    bits_per_char: int = 8,
 ) -> str:
     """Decode binary UTXO packet amounts back into text.
 

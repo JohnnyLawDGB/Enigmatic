@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from enigmatic_dgb.ordinals.indexer import OrdinalIndexer, OrdinalLocation, OrdinalScanConfig
-from enigmatic_dgb.ordinals.inscriptions import InscriptionPayload, OrdinalInscriptionDecoder
+from enigmatic_dgb.ordinals.indexer import (
+    OrdinalIndexer,
+    OrdinalLocation,
+    OrdinalScanConfig,
+)
+from enigmatic_dgb.ordinals.inscriptions import (
+    InscriptionPayload,
+    OrdinalInscriptionDecoder,
+)
 
 
 @dataclass
@@ -45,7 +52,9 @@ def _build_mock_data(message: str = "hello-enigmatic") -> tuple[MockRPC, str, st
 def test_scan_range_identifies_op_return_inscription() -> None:
     rpc, txid, _ = _build_mock_data()
     indexer = OrdinalIndexer(rpc)
-    config = OrdinalScanConfig(start_height=rpc.get_best_height(), end_height=rpc.get_best_height(), limit=None)
+    config = OrdinalScanConfig(
+        start_height=rpc.get_best_height(), end_height=rpc.get_best_height(), limit=None
+    )
 
     locations = indexer.scan_range(config)
 

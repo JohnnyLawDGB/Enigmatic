@@ -41,7 +41,9 @@ def message_with_encrypted_payload(
     return replace(base_message, payload=payload_wrapper, encrypted=True)
 
 
-def message_decrypt_payload(message: EnigmaticMessage, passphrase: str) -> dict[str, Any]:
+def message_decrypt_payload(
+    message: EnigmaticMessage, passphrase: str
+) -> dict[str, Any]:
     """Return the plaintext payload for *message* using *passphrase* when needed."""
 
     if not message.encrypted:

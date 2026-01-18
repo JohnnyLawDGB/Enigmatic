@@ -74,4 +74,3 @@ def test_responder_rejects_mismatched_session() -> None:
 
     with pytest.raises(ValueError):
         responder_process_init_and_build_resp(responder_state, init_payload)
-

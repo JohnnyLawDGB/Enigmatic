@@ -44,7 +44,9 @@ def ladder_step_ratio(index: int, decimals: int = 8) -> float:
     """Return the prime ladder ratio at ``index`` (prime_n / prime_{n+1})."""
 
     if index < 0 or index + 1 >= len(PRIME_SEQUENCE):
-        raise IndexError("Prime ladder index is out of range for the configured sequence")
+        raise IndexError(
+            "Prime ladder index is out of range for the configured sequence"
+        )
     return prime_ratio(PRIME_SEQUENCE[index], PRIME_SEQUENCE[index + 1], decimals)
 
 
@@ -57,11 +59,16 @@ def iter_prime_pairs(decimals: int = 8) -> Iterator[tuple[int, int, int, float]]
     for index in range(len(PRIME_SEQUENCE) - 1):
         numerator = PRIME_SEQUENCE[index]
         denominator = PRIME_SEQUENCE[index + 1]
-        yield index, numerator, denominator, prime_ratio(numerator, denominator, decimals)
+        yield index, numerator, denominator, prime_ratio(
+            numerator, denominator, decimals
+        )
 
 
 def match_prime_ratio(
-    value: float, tolerance: float = 1e-8, decimals: int = 8, primes: Sequence[int] | None = None
+    value: float,
+    tolerance: float = 1e-8,
+    decimals: int = 8,
+    primes: Sequence[int] | None = None,
 ) -> tuple[int, int, int, float] | None:
     """Return the matching prime pair for ``value`` if it is a ladder ratio.
 

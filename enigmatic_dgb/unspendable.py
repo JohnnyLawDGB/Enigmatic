@@ -180,14 +180,20 @@ def _prefix_to_version(prefix: str) -> bytes:
     if prefix not in _DOGE_FAVORITE_PREFIXES:
         if len(prefix) != 3:
             raise ValueError("Prefix must be exactly three characters long.")
-        if prefix[0] != "D" or prefix[2] != "x" or prefix[1] not in {"A", "B", "C", "D", "E"}:
+        if (
+            prefix[0] != "D"
+            or prefix[2] != "x"
+            or prefix[1] not in {"A", "B", "C", "D", "E"}
+        ):
             raise ValueError("Prefix must match the D[A-E]x pattern.")
 
     first_char = prefix[0]
     try:
         prefix_char_seed = seeds[b58_digits.index(first_char)]
     except IndexError as exc:
-        raise ValueError(f"No seed available for prefix character '{first_char}'.") from exc
+        raise ValueError(
+            f"No seed available for prefix character '{first_char}'."
+        ) from exc
 
     prefix_bytes = prefix_char_seed.to_bytes(1, "big")
     if prefix in _DOGE_FAVORITE_PREFIXES:

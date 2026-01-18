@@ -140,11 +140,15 @@ def prepare_inscription_transaction(
 
         inscription_hex = plan.get("metadata", {}).get("taproot_script_hex")
         if not inscription_hex:
-            raise InscriptionFlowError("Planner did not emit a Taproot inscription script; aborting")
+            raise InscriptionFlowError(
+                "Planner did not emit a Taproot inscription script; aborting"
+            )
 
     estimated_fee = _extract_estimated_fee(plan)
     if estimated_fee is None:
-        raise InscriptionFlowError("Planner did not provide an estimated fee; refusing to proceed")
+        raise InscriptionFlowError(
+            "Planner did not provide an estimated fee; refusing to proceed"
+        )
 
     fee_selection = select_fee_rate(
         rpc,
@@ -211,12 +215,16 @@ def prepare_inscription_transaction(
                 replaceable=rbf,
             )
     except RuntimeError as exc:
-        raise InscriptionFlowError(f"Failed to build or sign the inscription transaction: {exc}") from exc
+        raise InscriptionFlowError(
+            f"Failed to build or sign the inscription transaction: {exc}"
+        ) from exc
 
     decoded = rpc.decoderawtransaction(raw_tx)
     vsize = decoded.get("vsize") or decoded.get("size")
     if vsize is None:
-        raise InscriptionFlowError("Could not decode vsize for inscription transaction; aborting")
+        raise InscriptionFlowError(
+            "Could not decode vsize for inscription transaction; aborting"
+        )
     vsize_int = int(vsize)
 
     fee_selection = fee_selection.with_vsize(vsize_int)
@@ -262,7 +270,9 @@ def _extract_estimated_fee(plan: dict | None) -> float | None:
     return float(fee) if fee is not None else None
 
 
-def write_receipt(path: Path, payload: bytes, content_type: str, details: dict[str, Any]) -> Path:
+def write_receipt(
+    path: Path, payload: bytes, content_type: str, details: dict[str, Any]
+) -> Path:
     """Persist a JSON receipt for the inscription flow."""
 
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -121,19 +121,30 @@ class AutomationDialect:
                     if frame_cfg.get("script_plane") is not None:
                         frame_script_plane = parse_script_plane_block(
                             frame_cfg["script_plane"],
-                            lambda msg, name=entry.get("name"):
-                                PlanningError(
-                                    f"Frame #{idx + 1} for symbol {name}: {msg}"
-                                ),
+                            lambda msg, name=entry.get("name"): PlanningError(
+                                f"Frame #{idx + 1} for symbol {name}: {msg}"
+                            ),
                         )
                     frames.append(
                         AutomationFrame(
                             value=Decimal(str(frame_cfg["value"])),
-                            fee=Decimal(str(frame_cfg["fee"])) if "fee" in frame_cfg else None,
+                            fee=(
+                                Decimal(str(frame_cfg["fee"]))
+                                if "fee" in frame_cfg
+                                else None
+                            ),
                             inputs=int(frame_cfg["m"]) if "m" in frame_cfg else None,
                             outputs=int(frame_cfg["n"]) if "n" in frame_cfg else None,
-                            delta=int(frame_cfg["delta"]) if "delta" in frame_cfg else None,
-                            sigma=int(frame_cfg["sigma"]) if "sigma" in frame_cfg else None,
+                            delta=(
+                                int(frame_cfg["delta"])
+                                if "delta" in frame_cfg
+                                else None
+                            ),
+                            sigma=(
+                                int(frame_cfg["sigma"])
+                                if "sigma" in frame_cfg
+                                else None
+                            ),
                             script_plane=frame_script_plane,
                         )
                     )
@@ -141,8 +152,9 @@ class AutomationDialect:
             if match.get("script_plane") is not None:
                 symbol_script_plane = parse_script_plane_block(
                     match["script_plane"],
-                    lambda msg, sym_name=entry.get("name"):
-                        PlanningError(f"Symbol {sym_name}: {msg}"),
+                    lambda msg, sym_name=entry.get("name"): PlanningError(
+                        f"Symbol {sym_name}: {msg}"
+                    ),
                 )
             symbol = AutomationSymbol(
                 name=str(entry["name"]),
@@ -226,17 +238,23 @@ class PatternPlan:
     def as_rpc_outputs(self) -> List[Dict[str, float]]:
         serialized = [{output.address: float(output.amount)} for output in self.outputs]
         if self.change_output is not None:
-            serialized.append({self.change_output.address: float(self.change_output.amount)})
+            serialized.append(
+                {self.change_output.address: float(self.change_output.amount)}
+            )
         return serialized
 
     def to_jsonable(self) -> Dict[str, Any]:
         return {
             "fee": str(self.fee),
             "inputs": [item.to_jsonable() for item in self.inputs],
-            "outputs": [output.to_jsonable(index) for index, output in enumerate(self.outputs)],
-            "change": self.change_output.to_jsonable(len(self.outputs))
-            if self.change_output is not None
-            else None,
+            "outputs": [
+                output.to_jsonable(index) for index, output in enumerate(self.outputs)
+            ],
+            "change": (
+                self.change_output.to_jsonable(len(self.outputs))
+                if self.change_output is not None
+                else None
+            ),
             "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
@@ -265,7 +283,9 @@ class PlannedTx:
     def as_rpc_outputs(self) -> List[Dict[str, float]]:
         outputs = [{self.to_output.address: float(self.to_output.amount)}]
         if self.change_output is not None:
-            outputs.append({self.change_output.address: float(self.change_output.amount)})
+            outputs.append(
+                {self.change_output.address: float(self.change_output.amount)}
+            )
         return outputs
 
     def to_jsonable(self, index: int) -> Dict[str, Any]:
@@ -274,9 +294,11 @@ class PlannedTx:
             "fee": str(self.fee),
             "inputs": [item.to_jsonable() for item in self.inputs],
             "to_output": self.to_output.to_jsonable(0),
-            "change": self.change_output.to_jsonable(1)
-            if self.change_output is not None
-            else None,
+            "change": (
+                self.change_output.to_jsonable(1)
+                if self.change_output is not None
+                else None
+            ),
             "script_plane": self.script_plane.to_dict() if self.script_plane else None,
         }
 
@@ -294,7 +316,9 @@ class PlannedChain:
     def to_jsonable(self) -> Dict[str, Any]:
         return {
             "to_address": self.to_address,
-            "transactions": [tx.to_jsonable(index) for index, tx in enumerate(self.transactions)],
+            "transactions": [
+                tx.to_jsonable(index) for index, tx in enumerate(self.transactions)
+            ],
             "initial_utxos": [entry.to_jsonable() for entry in self.initial_utxos],
             "block_target": self.block_target,
             "enforce_block_target": self.enforce_block_target,
@@ -334,16 +358,22 @@ class SymbolPlanner:
         current_height = self.rpc.getblockcount()
         if block_target is not None:
             if block_target <= current_height:
-                raise PlanningError("Block target must be greater than the current height")
+                raise PlanningError(
+                    "Block target must be greater than the current height"
+                )
             enforce_block_target = True
         else:
             block_target = current_height + symbol.delta if symbol.delta > 0 else None
         utxos = self.rpc.listunspent(self.automation.min_confirmations)
-        selected, total = self._select_utxos(utxos, symbol.inputs, symbol.value + symbol.fee)
+        selected, total = self._select_utxos(
+            utxos, symbol.inputs, symbol.value + symbol.fee
+        )
         script_plane = symbol.script_plane
         receiver_address = receiver or self._address_for_script_plane(script_plane)
         outputs: Dict[str, Decimal] = {receiver_address: symbol.value}
-        change_amount = (total - symbol.value - symbol.fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+        change_amount = (total - symbol.value - symbol.fee).quantize(
+            EIGHT_DP, rounding=ROUND_DOWN
+        )
         if symbol.outputs > 1:
             if change_amount <= 0:
                 raise PlanningError(
@@ -351,7 +381,9 @@ class SymbolPlanner:
                 )
             outputs.update(self._distribute_change(symbol.outputs - 1, change_amount))
         elif change_amount > 0:
-            outputs[receiver_address] = (outputs[receiver_address] + change_amount).quantize(
+            outputs[receiver_address] = (
+                outputs[receiver_address] + change_amount
+            ).quantize(
                 EIGHT_DP,
                 rounding=ROUND_DOWN,
             )
@@ -391,7 +423,9 @@ class SymbolPlanner:
             normalized_frames.append(
                 AutomationFrame(
                     value=frame.value.quantize(EIGHT_DP, rounding=ROUND_DOWN),
-                    fee=(frame.fee or symbol.fee).quantize(EIGHT_DP, rounding=ROUND_DOWN),
+                    fee=(frame.fee or symbol.fee).quantize(
+                        EIGHT_DP, rounding=ROUND_DOWN
+                    ),
                     inputs=frame.inputs,
                     outputs=frame.outputs,
                     delta=frame.delta,
@@ -400,7 +434,9 @@ class SymbolPlanner:
             )
         required_inputs = normalized_frames[0].inputs or symbol.inputs
         if required_inputs <= 0:
-            raise PlanningError("Chained plan requires at least one input in the first frame")
+            raise PlanningError(
+                "Chained plan requires at least one input in the first frame"
+            )
         if block_target is not None and block_target <= self.rpc.getblockcount():
             raise PlanningError("Block target must be greater than the current height")
         if block_target is not None:
@@ -425,10 +461,13 @@ class SymbolPlanner:
             if value <= 0:
                 raise PlanningError("Each chained frame must send a positive value")
             remaining_required = sum(
-                next_frame.value + next_frame.fee for next_frame in normalized_frames[index + 1 :]
+                next_frame.value + next_frame.fee
+                for next_frame in normalized_frames[index + 1 :]
             )
             if index > 0 and frame.inputs not in (None, 1):
-                raise PlanningError("Only the first chained frame may specify multiple inputs")
+                raise PlanningError(
+                    "Only the first chained frame may specify multiple inputs"
+                )
             if index == 0:
                 inputs = [
                     PatternInput(
@@ -440,7 +479,9 @@ class SymbolPlanner:
                 ]
             else:
                 if previous_change_amount is None:
-                    raise PlanningError("Previous change amount missing for chained frame")
+                    raise PlanningError(
+                        "Previous change amount missing for chained frame"
+                    )
                 inputs = [
                     PatternInput(
                         txid=PREVIOUS_CHANGE_SENTINEL,
@@ -450,16 +491,22 @@ class SymbolPlanner:
                 ]
             if available_pool < value + fee:
                 raise PlanningError("Insufficient funds to satisfy chained plan")
-            change_amount = (available_pool - value - fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+            change_amount = (available_pool - value - fee).quantize(
+                EIGHT_DP, rounding=ROUND_DOWN
+            )
             if index < len(normalized_frames) - 1 and change_amount < DUST_LIMIT:
                 raise PlanningError("Intermediate change would fall below dust limit")
             if change_amount < remaining_required:
-                raise PlanningError("Change does not cover downstream frames; adjust fees or values")
+                raise PlanningError(
+                    "Change does not cover downstream frames; adjust fees or values"
+                )
             to_output = PatternOutput(address=to_address, amount=value)
             change_output: PatternOutput | None = None
             if change_amount >= DUST_LIMIT:
                 change_address = self.rpc.getrawchangeaddress()
-                change_output = PatternOutput(address=change_address, amount=change_amount)
+                change_output = PatternOutput(
+                    address=change_address, amount=change_amount
+                )
                 previous_change_amount = change_amount
                 available_pool = change_amount
             else:
@@ -485,7 +532,9 @@ class SymbolPlanner:
                 )
             )
         assert initial_utxos is not None  # for mypy; first frame always sets it
-        funding_inputs = [item for item in initial_utxos if item.txid != PREVIOUS_CHANGE_SENTINEL]
+        funding_inputs = [
+            item for item in initial_utxos if item.txid != PREVIOUS_CHANGE_SENTINEL
+        ]
         return PlannedChain(
             to_address=to_address,
             transactions=transactions,
@@ -519,17 +568,25 @@ class SymbolPlanner:
             current_height = self.rpc.getblockcount()
 
     def broadcast(
-        self, plan: SymbolPlan, *, poll_seconds: float = 15.0, progress_callback: ProgressCallback | None = None
+        self,
+        plan: SymbolPlan,
+        *,
+        poll_seconds: float = 15.0,
+        progress_callback: ProgressCallback | None = None,
     ) -> str:
         if plan.enforce_block_target and plan.block_target is not None:
             self._wait_for_block_target(
-                plan.block_target, progress_callback=progress_callback, poll_seconds=poll_seconds
+                plan.block_target,
+                progress_callback=progress_callback,
+                poll_seconds=poll_seconds,
             )
         outputs_json = [{addr: float(amount)} for addr, amount in plan.outputs.items()]
         raw_hex = self.rpc.createrawtransaction(plan.inputs, outputs_json)
         signed = self.rpc.signrawtransactionwithwallet(raw_hex)
         if not signed.get("complete"):
-            raise PlanningError("signrawtransactionwithwallet returned incomplete signature")
+            raise PlanningError(
+                "signrawtransactionwithwallet returned incomplete signature"
+            )
         return self.rpc.sendrawtransaction(signed["hex"])
 
     def broadcast_chain(
@@ -547,7 +604,9 @@ class SymbolPlanner:
 
         if plan.enforce_block_target and plan.block_target is not None:
             self._wait_for_block_target(
-                plan.block_target, progress_callback=progress_callback, poll_seconds=poll_seconds
+                plan.block_target,
+                progress_callback=progress_callback,
+                poll_seconds=poll_seconds,
             )
         pattern_sequence = plan.as_pattern_sequence()
         return broadcast_pattern_plan(
@@ -566,11 +625,7 @@ class SymbolPlanner:
         required_inputs: int,
         minimum_total: Decimal,
     ) -> tuple[list[Mapping[str, Any]], Decimal]:
-        spendable = [
-            utxo
-            for utxo in utxos
-            if utxo.get("spendable", True)
-        ]
+        spendable = [utxo for utxo in utxos if utxo.get("spendable", True)]
         if len(spendable) < required_inputs:
             raise PlanningError(
                 f"Wallet only has {len(spendable)} spendable UTXOs, requires {required_inputs}"
@@ -588,7 +643,9 @@ class SymbolPlanner:
             )
         return selected, total
 
-    def _distribute_change(self, branches: int, change_amount: Decimal) -> Dict[str, Decimal]:
+    def _distribute_change(
+        self, branches: int, change_amount: Decimal
+    ) -> Dict[str, Decimal]:
         if change_amount <= 0:
             return {}
         per_branch = (change_amount / branches).quantize(EIGHT_DP, rounding=ROUND_DOWN)
@@ -603,7 +660,9 @@ class SymbolPlanner:
             amount = (
                 per_branch
                 if index < branches - 1
-                else (change_amount - distributed).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+                else (change_amount - distributed).quantize(
+                    EIGHT_DP, rounding=ROUND_DOWN
+                )
             )
             outputs[address] = amount
             distributed += amount
@@ -643,7 +702,11 @@ def plan_explicit_pattern(
     if fee < 0:
         raise PlanningError("Fee must be non-negative")
     required_total = total_pattern + (fee * len(normalized_amounts))
-    utxos = list(preferred_utxos) if preferred_utxos is not None else rpc.listunspent(min_confirmations)
+    utxos = (
+        list(preferred_utxos)
+        if preferred_utxos is not None
+        else rpc.listunspent(min_confirmations)
+    )
     if preferred_utxos is not None and min_confirmations > 0:
         for entry in utxos:
             confirmations = int(entry.get("confirmations", 0) or 0)
@@ -683,8 +746,12 @@ def plan_explicit_pattern(
                 )
             ]
         if available_pool < amount + fee:
-            raise PlanningError("Insufficient funds for requested pattern amounts and fees")
-        change_amount = (available_pool - amount - fee).quantize(EIGHT_DP, rounding=ROUND_DOWN)
+            raise PlanningError(
+                "Insufficient funds for requested pattern amounts and fees"
+            )
+        change_amount = (available_pool - amount - fee).quantize(
+            EIGHT_DP, rounding=ROUND_DOWN
+        )
         step_outputs = [PatternOutput(address=to_address, amount=amount)]
         change_output: PatternOutput | None = None
         is_last = index == len(normalized_amounts) - 1
@@ -695,7 +762,9 @@ def plan_explicit_pattern(
                 )
             if change_amount >= DUST_LIMIT:
                 change_address = rpc.getrawchangeaddress()
-                change_output = PatternOutput(address=change_address, amount=change_amount)
+                change_output = PatternOutput(
+                    address=change_address, amount=change_amount
+                )
             else:
                 step_outputs[-1] = PatternOutput(
                     address=step_outputs[-1].address,
@@ -732,7 +801,9 @@ def broadcast_pattern_plan(
     """Broadcast a chained pattern plan using the transaction builder."""
 
     if op_returns is not None and len(op_returns) != len(plan.steps):
-        raise PlanningError("OP_RETURN payload count must match the number of transactions")
+        raise PlanningError(
+            "OP_RETURN payload count must match the number of transactions"
+        )
 
     tx_builder = builder or TransactionBuilder(rpc)
     txids: list[str] = []
@@ -744,17 +815,23 @@ def broadcast_pattern_plan(
         primary_outputs = [step.outputs[0] for step in plan.steps]
         destination_addresses = {output.address for output in primary_outputs}
         if len(destination_addresses) != 1:
-            raise PlanningError("Single fan-out mode requires a consistent destination address")
+            raise PlanningError(
+                "Single fan-out mode requires a consistent destination address"
+            )
         to_address = destination_addresses.pop()
 
         fanout_fee = plan.steps[0].fee
         if any(step.fee != fanout_fee for step in plan.steps):
-            raise PlanningError("Single fan-out mode requires a uniform fee across frames")
+            raise PlanningError(
+                "Single fan-out mode requires a uniform fee across frames"
+            )
 
         script_planes = {step.script_plane for step in plan.steps}
         script_plane = script_planes.pop() if len(script_planes) == 1 else None
         if len(script_planes) > 1:
-            raise PlanningError("Single fan-out mode does not support mixed script planes")
+            raise PlanningError(
+                "Single fan-out mode does not support mixed script planes"
+            )
 
         payload = None
         if op_returns is not None:
@@ -792,7 +869,9 @@ def broadcast_pattern_plan(
         change_index: int | None = None
         if step.change_output is not None:
             change_index = len(ordered_outputs)
-            ordered_outputs[step.change_output.address] = float(step.change_output.amount)
+            ordered_outputs[step.change_output.address] = float(
+                step.change_output.amount
+            )
         payload = op_returns[index - 1] if op_returns is not None else None
         payload_list = [payload] if payload else None
         txid = tx_builder.send_payment_tx(
@@ -812,7 +891,9 @@ def broadcast_pattern_plan(
         is_last_step = index == len(plan.steps)
         if not is_last_step:
             if previous_change_ref is None:
-                raise PlanningError("Chained plan ended before downstream steps could be funded")
+                raise PlanningError(
+                    "Chained plan ended before downstream steps could be funded"
+                )
             if min_confirmations_between_steps > 0:
                 _wait_for_confirmations(
                     rpc,
@@ -838,7 +919,9 @@ def _resolve_chained_inputs(
                 raise PlanningError(
                     "Chained plan referenced previous change output before it was created"
                 )
-            rpc_inputs.append({"txid": previous_change_ref[0], "vout": previous_change_ref[1]})
+            rpc_inputs.append(
+                {"txid": previous_change_ref[0], "vout": previous_change_ref[1]}
+            )
         else:
             rpc_inputs.append({"txid": entry.txid, "vout": entry.vout})
     return rpc_inputs
@@ -893,11 +976,7 @@ def _query_confirmations(rpc: DigiByteRPC, txid: str) -> int:
 def _select_utxos_covering_total(
     utxos: Sequence[Mapping[str, Any]], minimum_total: Decimal
 ) -> tuple[list[Mapping[str, Any]], Decimal]:
-    spendable = [
-        utxo
-        for utxo in utxos
-        if utxo.get("spendable", True)
-    ]
+    spendable = [utxo for utxo in utxos if utxo.get("spendable", True)]
     if not spendable:
         raise PlanningError("Wallet has no spendable UTXOs")
     candidates = sorted(

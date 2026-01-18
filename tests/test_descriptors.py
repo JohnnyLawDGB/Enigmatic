@@ -53,4 +53,6 @@ def test_threshold_descriptor_adds_delay(sample_signer_set: SignerSet) -> None:
 
 def test_threshold_leaf_rejects_invalid_threshold(sample_signer_set: SignerSet) -> None:
     with pytest.raises(ValueError):
-        threshold_leaf(SignerSet(id="oops", base_keys=sample_signer_set.base_keys, threshold=0))
+        threshold_leaf(
+            SignerSet(id="oops", base_keys=sample_signer_set.base_keys, threshold=0)
+        )

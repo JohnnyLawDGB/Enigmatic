@@ -45,6 +45,7 @@ PRINT_BINARY_PREVIEW_MAX_CHARS: int = 120
 # Data models and helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclasses.dataclass
 class TxRecord:
     """Lightweight transaction projection used for analysis."""
@@ -129,7 +130,9 @@ def _resolve_height_range(
     return resolved_start, resolved_end
 
 
-def _extract_output_details(tx: dict, target_addresses: set[str]) -> tuple[list[tuple[int, str]], int, bool]:
+def _extract_output_details(
+    tx: dict, target_addresses: set[str]
+) -> tuple[list[tuple[int, str]], int, bool]:
     """Return output detail list, total output value, and whether target hit."""
 
     outputs: list[tuple[int, str]] = []
@@ -194,7 +197,9 @@ def load_transactions_for_addresses(
 
     rpc = _rpc_from_env()
     addr_set = set(addresses)
-    start_h, end_h = _resolve_height_range(rpc, start_height, end_height, start_time, end_time)
+    start_h, end_h = _resolve_height_range(
+        rpc, start_height, end_height, start_time, end_time
+    )
     logger.info("Scanning heights %s-%s for addresses %s", start_h, end_h, addresses)
 
     tx_cache: dict[str, dict] = {}
@@ -229,7 +234,9 @@ def load_transactions_for_addresses(
                 total_input_value=total_in,
                 total_output_value=total_out,
                 fee_value=fee,
-                input_count=len([vin for vin in tx.get("vin", []) if "coinbase" not in vin]),
+                input_count=len(
+                    [vin for vin in tx.get("vin", []) if "coinbase" not in vin]
+                ),
                 output_count=len(outputs),
                 output_details=outputs,
             )
@@ -249,11 +256,13 @@ def project_to_state_planes(tx_records: list[dict]) -> pd.DataFrame:
     df["delta_height"] = df["block_height"].diff().fillna(0).astype(int)
     df["delta_time"] = df["block_time"].diff().fillna(0).astype(int)
     df["value_net"] = df["total_output_value"] - df["total_input_value"]
-    df = df.rename(columns={
-        "total_input_value": "value_total_in",
-        "total_output_value": "value_total_out",
-        "fee_value": "fee",
-    })
+    df = df.rename(
+        columns={
+            "total_input_value": "value_total_in",
+            "total_output_value": "value_total_out",
+            "fee_value": "fee",
+        }
+    )
     return df
 
 
@@ -316,7 +325,9 @@ def scan_dtsp_patterns(df: pd.DataFrame) -> dict:
             results[channel] = analyze_periodicity(df[channel], channel)
 
     # Motif detection via simple run-length encoding on fee buckets
-    fee_buckets = (df.get("fee", pd.Series(dtype=int)) // max(FEE_THRESHOLD_SATS, 1)).astype(int)
+    fee_buckets = (
+        df.get("fee", pd.Series(dtype=int)) // max(FEE_THRESHOLD_SATS, 1)
+    ).astype(int)
     runs: list[tuple[int, int]] = []
     last_val = None
     run_len = 0
@@ -335,7 +346,9 @@ def scan_dtsp_patterns(df: pd.DataFrame) -> dict:
     return results
 
 
-def build_bitstream(df: pd.DataFrame, mapping_fn: Callable[[pd.Series], int]) -> list[int]:
+def build_bitstream(
+    df: pd.DataFrame, mapping_fn: Callable[[pd.Series], int]
+) -> list[int]:
     """Apply mapping_fn row-wise to build a bitstream."""
 
     bits: list[int] = []
@@ -427,7 +440,9 @@ def analyze_address_activity(
 ) -> None:
     """Top-level orchestration to run analysis and print summaries."""
 
-    tx_records = load_transactions_for_addresses(addresses, start_height, end_height, start_time, end_time)
+    tx_records = load_transactions_for_addresses(
+        addresses, start_height, end_height, start_time, end_time
+    )
     if not tx_records:
         print("No transactions found for the given parameters.")
         return

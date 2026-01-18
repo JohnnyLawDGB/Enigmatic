@@ -20,7 +20,7 @@ import subprocess
 import sys
 import textwrap
 from collections import defaultdict, OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Sequence
@@ -92,15 +92,8 @@ from .watcher import Watcher
 from .fees import (
     DEFAULT_CONF_TARGET,
     DEFAULT_ESTIMATE_MODE,
-    calculate_fee_sats,
-    format_floors_for_log,
-    sat_vb_to_dgb_per_kvb,
-    select_fee_rate,
-)
-from .fees import (
-    DEFAULT_CONF_TARGET,
-    DEFAULT_ESTIMATE_MODE,
     FeeSelectionResult,
+    calculate_fee_sats,
     format_floors_for_log,
     sat_vb_to_dgb_per_kvb,
     select_fee_rate,
@@ -264,7 +257,9 @@ def _offer_taproot_wallet_setup(rpc_config: RPCConfig) -> None:
         )
         if result.stdout:
             print(result.stdout.strip())
-    except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+    except (
+        subprocess.CalledProcessError
+    ) as exc:  # pragma: no cover - interactive shell call
         print(f"createwallet failed: {exc.stderr or exc}")
         return
 
@@ -274,7 +269,9 @@ def _offer_taproot_wallet_setup(rpc_config: RPCConfig) -> None:
         )
         address = addr_proc.stdout.strip()
         print(f"Taproot receive address for {wallet_name}: {address}")
-    except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+    except (
+        subprocess.CalledProcessError
+    ) as exc:  # pragma: no cover - interactive shell call
         print(f"Unable to obtain a Taproot address: {exc.stderr or exc}")
         return
 
@@ -288,7 +285,9 @@ def _offer_taproot_wallet_setup(rpc_config: RPCConfig) -> None:
             )
             txid = send_proc.stdout.strip()
             print(f"Funding transaction broadcast: {txid}")
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - interactive shell call
+        except (
+            subprocess.CalledProcessError
+        ) as exc:  # pragma: no cover - interactive shell call
             print(f"Funding failed: {exc.stderr or exc}")
     else:
         print("You can fund the wallet later using digibyte-cli sendtoaddress.\n")
@@ -307,8 +306,12 @@ def _prompt_rpc_credentials() -> dict[str, Any]:
             break
         except ValueError:
             print("Invalid port; please enter an integer.")
-    wallet = _prompt_str("Default wallet (optional)", default=existing.get("wallet", ""))
-    use_https = _prompt_bool("Use HTTPS?", default=bool(existing.get("use_https", False)))
+    wallet = _prompt_str(
+        "Default wallet (optional)", default=existing.get("wallet", "")
+    )
+    use_https = _prompt_bool(
+        "Use HTTPS?", default=bool(existing.get("use_https", False))
+    )
 
     rpc_config = {
         "user": user,
@@ -347,7 +350,9 @@ def _quickstart_menu(rpc_config: RPCConfig) -> None:
         return
     if choice == "1":
         to_address = _prompt_str("Destination address")
-        intent = _prompt_str("Intent (identity, sync, presence, etc.)", default="presence")
+        intent = _prompt_str(
+            "Intent (identity, sync, presence, etc.)", default="presence"
+        )
         channel = _prompt_str("Channel", default="default")
         payload = _prompt_str("Payload JSON (optional)", default="{}")
         print("Running send-message as a dry run...")
@@ -417,9 +422,20 @@ def _quickstart_menu(rpc_config: RPCConfig) -> None:
         address = _prompt_str("Address to watch")
         poll_interval = _prompt_str("Poll interval (seconds)", default="30")
         print("Checking watcher connectivity (--dry-run)...")
-        _run_cli_command(["watch", "--address", address, "--poll-interval", poll_interval, "--dry-run"])
+        _run_cli_command(
+            [
+                "watch",
+                "--address",
+                address,
+                "--poll-interval",
+                poll_interval,
+                "--dry-run",
+            ]
+        )
         if _prompt_bool("Start the watcher now? (Ctrl+C to stop)", default=False):
-            _run_cli_command(["watch", "--address", address, "--poll-interval", poll_interval])
+            _run_cli_command(
+                ["watch", "--address", address, "--poll-interval", poll_interval]
+            )
     else:
         print("Unknown selection. Please try again.\n")
     print()
@@ -441,7 +457,9 @@ def cmd_quickstart(args: argparse.Namespace) -> None:
 
     _check_python_prereq()
     if not _digibyte_cli_available():
-        print("digibyte-cli not detected. Install DigiByte Core tools to unlock wallet helpers.")
+        print(
+            "digibyte-cli not detected. Install DigiByte Core tools to unlock wallet helpers."
+        )
 
     rpc_values = _prompt_rpc_credentials()
     config_path = _write_rpc_config_file(rpc_values)
@@ -452,7 +470,9 @@ def cmd_quickstart(args: argparse.Namespace) -> None:
     if ok:
         print(detail or "RPC connectivity looks good.\n")
     else:
-        print("RPC connectivity failed. Start your node or fix credentials, then retry.")
+        print(
+            "RPC connectivity failed. Start your node or fix credentials, then retry."
+        )
         if detail:
             print(f"Details: {detail}")
         if not _prompt_bool("Continue anyway?", default=False):
@@ -494,7 +514,9 @@ def build_parser() -> argparse.ArgumentParser:
     dialect_parser = subparsers.add_parser(
         "dialect", help="List, validate, or generate dialect YAML files"
     )
-    dialect_subparsers = dialect_parser.add_subparsers(dest="dialect_command", required=True)
+    dialect_subparsers = dialect_parser.add_subparsers(
+        dest="dialect_command", required=True
+    )
     dialect_list = dialect_subparsers.add_parser(
         "list", help="List built-in and user-provided dialect files"
     )
@@ -617,7 +639,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate a human-readable unspendable address",
         description=(
             "Create an intentionally unspendable vanity address using the DiMECASH/Base58 mapping.\n"
-            "Example: enigmatic unspendable DCx \"THiSxiSxTHExSTUFF\" -> "
+            'Example: enigmatic unspendable DCx "THiSxiSxTHExSTUFF" -> '
             "DCxTHiSxiSxTHExSTUFFzzzzzzzzbSG1oo"
         ),
     )
@@ -1149,7 +1171,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum fee rate floor in sat/vB (default: 10500 for lab)",
     )
     ord_wizard_parser.add_argument(
-        "--max-fee-sats", type=int, help="Fee cap in satoshis (recommended auto if omitted)"
+        "--max-fee-sats",
+        type=int,
+        help="Fee cap in satoshis (recommended auto if omitted)",
     )
     ord_wizard_parser.add_argument(
         "--wallet",
@@ -1763,7 +1787,7 @@ def cmd_send_message(args: argparse.Namespace) -> None:
     payload = _parse_payload_json(args.payload_json)
     message = EnigmaticMessage(
         id=str(uuid4()),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         channel=args.channel,
         intent=args.intent,
         payload=payload,
@@ -1812,7 +1836,9 @@ def cmd_watch(args: argparse.Namespace) -> None:
     config = EncodingConfig.enigmatic_default()
     watcher = Watcher(
         rpc,
-        addresses=args.address if isinstance(args.address, (list, tuple)) else [args.address],
+        addresses=(
+            args.address if isinstance(args.address, (list, tuple)) else [args.address]
+        ),
         config=config,
         poll_interval_seconds=args.poll_interval,
     )
@@ -1860,7 +1886,7 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
             session_id=args.session_id,
             channel=session_channel,
             dialect=session_dialect,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             session_key=session_key,
         )
 
@@ -2379,9 +2405,7 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
                     leaf_script, internal_key
                 )
             except ValueError as exc:
-                raise CLIError(
-                    f"Failed to compute Taproot output: {exc}"
-                ) from exc
+                raise CLIError(f"Failed to compute Taproot output: {exc}") from exc
 
             # Create the commitment address from the tweaked output key
             output_key = bytes.fromhex(taproot_output["output_key"])
@@ -2458,9 +2482,16 @@ def _resolve_wizard_payload(args: argparse.Namespace) -> tuple[bytes, str]:
         payload_path = Path(args.payload_file).expanduser()
         if not payload_path.exists():
             raise CLIError(f"Payload file not found: {payload_path}")
-        return payload_path.read_bytes(), args.content_type or "application/octet-stream"
+        return (
+            payload_path.read_bytes(),
+            args.content_type or "application/octet-stream",
+        )
     if args.payload_hex:
-        raw = args.payload_hex[2:] if args.payload_hex.lower().startswith("0x") else args.payload_hex
+        raw = (
+            args.payload_hex[2:]
+            if args.payload_hex.lower().startswith("0x")
+            else args.payload_hex
+        )
         try:
             return bytes.fromhex(raw), args.content_type or "application/octet-stream"
         except ValueError as exc:
@@ -2550,7 +2581,7 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
     if prepared.txid:
         receipt_path = (
             Path("./receipts")
-            / f"ordinal_{prepared.txid}_{int(datetime.utcnow().timestamp())}.json"
+            / f"ordinal_{prepared.txid}_{int(datetime.now(timezone.utc).timestamp())}.json"
         )
         write_receipt(
             receipt_path,
@@ -3050,10 +3081,14 @@ def cmd_dialect_generate(args: argparse.Namespace) -> None:
 
     output_path = Path(
         args.output_path
-        or _prompt_str("Output path for new dialect", default="examples/dialect-new.yaml")
+        or _prompt_str(
+            "Output path for new dialect", default="examples/dialect-new.yaml"
+        )
     ).expanduser()
-    if output_path.exists() and not args.force and not _prompt_bool(
-        f"{output_path} exists. Overwrite?", default=False
+    if (
+        output_path.exists()
+        and not args.force
+        and not _prompt_bool(f"{output_path} exists. Overwrite?", default=False)
     ):
         print("Aborted without writing a dialect.")
         return
@@ -3067,7 +3102,9 @@ def cmd_dialect_generate(args: argparse.Namespace) -> None:
     symbol_description = _prompt_str(
         "Primary symbol description", default="First symbol in the custom dialect"
     )
-    anchors = _prompt_decimal_sequence("Value anchors (comma-separated, e.g., 21.21,7.00)")
+    anchors = _prompt_decimal_sequence(
+        "Value anchors (comma-separated, e.g., 21.21,7.00)"
+    )
     micros = _prompt_decimal_sequence(
         "Micro amounts (comma-separated, optional)", allow_empty=True
     )
@@ -3190,7 +3227,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         BinaryEncodingError,
         DTSPEncodingError,
     ) as exc:
-        logger.error("Command failed: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG))
+        logger.error(
+            "Command failed: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG)
+        )
         parser.exit(1, f"error: {exc}\n")
 
 

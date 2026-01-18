@@ -112,7 +112,9 @@ def _safe_rpc_call(func, *, friendly_name: str) -> tuple[bool, Any]:
         return False, None
 
 
-def _verify_broadcast(rpc: DigiByteRPC, txid: str) -> tuple[str, int | None, str | None]:
+def _verify_broadcast(
+    rpc: DigiByteRPC, txid: str
+) -> tuple[str, int | None, str | None]:
     """Verify transaction status after broadcast.
 
     Returns:
@@ -141,7 +143,9 @@ def _verify_broadcast(rpc: DigiByteRPC, txid: str) -> tuple[str, int | None, str
             confirmations = tx_info.get("confirmations", 0)
             blockhash = tx_info.get("blockhash")
             if confirmations > 0:
-                print(f"Transaction {txid[:16]}... already confirmed ({confirmations} confirmations)")
+                print(
+                    f"Transaction {txid[:16]}... already confirmed ({confirmations} confirmations)"
+                )
                 return "confirmed", confirmations, blockhash
             else:
                 print(f"Transaction {txid[:16]}... found but unconfirmed")
@@ -155,7 +159,9 @@ def _verify_broadcast(rpc: DigiByteRPC, txid: str) -> tuple[str, int | None, str
             confirmations = tx_info.get("confirmations", 0)
             blockhash = tx_info.get("blockhash")
             if confirmations > 0:
-                print(f"Transaction {txid[:16]}... confirmed ({confirmations} confirmations)")
+                print(
+                    f"Transaction {txid[:16]}... confirmed ({confirmations} confirmations)"
+                )
                 return "confirmed", confirmations, blockhash
             else:
                 print(f"Transaction {txid[:16]}... in wallet, awaiting confirmation")
@@ -177,7 +183,9 @@ def run_enigmatic_cli(args: Sequence[str]) -> int:
     if executable:
         print(f"Running CLI: {executable} {' '.join(args)}")
         # Explicitly pass environment to subprocess to ensure RPC credentials are available
-        result = subprocess.run([executable, *args], capture_output=True, text=True, env=os.environ.copy())
+        result = subprocess.run(
+            [executable, *args], capture_output=True, text=True, env=os.environ.copy()
+        )
         if result.stdout:
             print(result.stdout)
         if result.stderr:
@@ -240,7 +248,7 @@ def handle_quickstart() -> None:
             Fee per tx: {fee}
             Mode: {mode}
             """
-    )
+        )
     )
     if not _confirm():
         print("Cancelled.")
@@ -284,9 +292,7 @@ def handle_dialect_symbols() -> None:
         if choice in {"b", "0"}:
             return
         if choice == "l":
-            dialect_path = prompt_str(
-                "Dialect YAML path", default=current_dialect_path
-            )
+            dialect_path = prompt_str("Dialect YAML path", default=current_dialect_path)
             current_dialect_path = dialect_path
             _list_dialect_symbols(dialect_path)
             continue
@@ -304,15 +310,28 @@ def handle_dialect_symbols() -> None:
         if choice == "1":
             receiver_override = prompt_str("Receiver address (optional)", default="")
         channel = prompt_str("Channel", default="default") if choice == "2" else ""
-        fee = prompt_float("Fee override (optional)", default=None) if choice == "2" else None
+        fee = (
+            prompt_float("Fee override (optional)", default=None)
+            if choice == "2"
+            else None
+        )
         dry_run = False
         broadcast_plan = False
         if choice == "2":
             dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
         else:
-            broadcast_plan = input("Broadcast after planning? [y/N]: ").strip().lower().startswith("y")
+            broadcast_plan = (
+                input("Broadcast after planning? [y/N]: ")
+                .strip()
+                .lower()
+                .startswith("y")
+            )
 
-        args = ["send-symbol" if choice == "2" else "plan-symbol", "--dialect-path", dialect_path]
+        args = [
+            "send-symbol" if choice == "2" else "plan-symbol",
+            "--dialect-path",
+            dialect_path,
+        ]
         if symbol:
             args.extend(["--symbol", symbol])
         if to_address:
@@ -429,7 +448,9 @@ def _collect_prime_burst_amounts() -> list[float]:
             "Comma-separated ladder indices to include", default="0,1,2"
         ).strip()
         try:
-            indices = [int(piece.strip()) for piece in raw_indices.split(",") if piece.strip()]
+            indices = [
+                int(piece.strip()) for piece in raw_indices.split(",") if piece.strip()
+            ]
         except ValueError:
             print("Invalid indices; please enter comma-separated integers.\n")
             continue
@@ -474,7 +495,9 @@ def handle_prime_ladder() -> None:
             continue
 
         to_address = prompt_str("Destination address")
-        use_custom = input("Override prime pair? [y/N]: ").strip().lower().startswith("y")
+        use_custom = (
+            input("Override prime pair? [y/N]: ").strip().lower().startswith("y")
+        )
         if use_custom:
             numerator = prompt_int("Numerator prime (p)")
             denominator = prompt_int("Denominator prime (q)")
@@ -497,10 +520,9 @@ def handle_prime_ladder() -> None:
                 print(f"Unable to compute ratio: {exc}\n")
                 continue
 
-        include_register = (
-            input("Include balancing register output? [Y/n]: ").strip().lower()
-            not in {"n", "no"}
-        )
+        include_register = input(
+            "Include balancing register output? [Y/n]: "
+        ).strip().lower() not in {"n", "no"}
         balancing_amount = None
         if include_register:
             balancing_amount = prompt_float(
@@ -569,11 +591,15 @@ def _run_prime_burst() -> None:
     if extra_amounts_raw.strip():
         try:
             extra_amounts = [
-                float(piece.strip()) for piece in extra_amounts_raw.split(",") if piece.strip()
+                float(piece.strip())
+                for piece in extra_amounts_raw.split(",")
+                if piece.strip()
             ]
             amounts.extend(extra_amounts)
         except ValueError:
-            print("Ignoring invalid custom amounts input; proceeding with ladder indices only.")
+            print(
+                "Ignoring invalid custom amounts input; proceeding with ladder indices only."
+            )
 
     fee = prompt_float("Fee for the fan-out transaction", default=0.21021)
     dry_run = input("Dry run? [Y/n]: ").strip().lower() not in {"n", "no"}
@@ -627,19 +653,31 @@ def handle_dtsp_messaging() -> None:
 
     to_address = prompt_str("Destination address")
     message = prompt_str("Plaintext message")
-    include_handshake = input("Include START/END handshake? [Y/n]: ").strip().lower() not in {
+    include_handshake = input(
+        "Include START/END handshake? [Y/n]: "
+    ).strip().lower() not in {
         "n",
         "no",
     }
-    encode_via_fee = input("Encode on fee plane? [Y/n]: ").strip().lower() not in {"n", "no"}
+    encode_via_fee = input("Encode on fee plane? [Y/n]: ").strip().lower() not in {
+        "n",
+        "no",
+    }
     base_amount = prompt_float(
         "Base amount per transaction (for fee-plane carrier or amount-plane)",
         default=0.0001,
     )
-    carrier_fee = prompt_float("Fee per tx when using amount-plane", default=DEFAULT_FEE)
-    dry_run = input("Dry run (no broadcast)? [Y/n]: ").strip().lower() not in {"n", "no"}
+    carrier_fee = prompt_float(
+        "Fee per tx when using amount-plane", default=DEFAULT_FEE
+    )
+    dry_run = input("Dry run (no broadcast)? [Y/n]: ").strip().lower() not in {
+        "n",
+        "no",
+    }
 
-    sequence = encode_message_to_dtsp_sequence(message, include_start_end=include_handshake)
+    sequence = encode_message_to_dtsp_sequence(
+        message, include_start_end=include_handshake
+    )
     preview = decode_dtsp_sequence_to_message(
         sequence, require_start_end=include_handshake if sequence else False
     )
@@ -665,7 +703,9 @@ def handle_dtsp_messaging() -> None:
                 "--fee",
                 f"{value:.8f}",
             ]
-            print(f"Running command for symbol #{index}: enigmatic-dgb {' '.join(args)}")
+            print(
+                f"Running command for symbol #{index}: enigmatic-dgb {' '.join(args)}"
+            )
             run_enigmatic_cli(args)
     else:
         amounts_csv = ",".join(f"{value:.8f}" for value in sequence)
@@ -695,7 +735,9 @@ def handle_chains() -> None:
     min_conf_between = prompt_int("Min confirmations between steps", default=None)
     wait_between = prompt_float("Wait between txs (seconds)", default=None)
     max_wait = prompt_float("Max wait seconds", default=None)
-    broadcast = input("Broadcast after planning? [y/N]: ").strip().lower().startswith("y")
+    broadcast = (
+        input("Broadcast after planning? [y/N]: ").strip().lower().startswith("y")
+    )
 
     args = [
         "plan-chain",
@@ -733,7 +775,9 @@ def _decode_once(addresses: Sequence[str]) -> None:
         print("No decoded packets observed in the recent window.")
         return
     for message in messages:
-        print(f"Channel: {message.channel} | Intent: {message.intent} | Payload: {message.payload}")
+        print(
+            f"Channel: {message.channel} | Intent: {message.intent} | Payload: {message.payload}"
+        )
 
 
 def handle_decode_watch() -> None:
@@ -780,7 +824,9 @@ def handle_decode_watch() -> None:
     _pause()
 
 
-def _group_transactions_by_txid(observed: Sequence[ObservedTx]) -> dict[str, list[ObservedTx]]:
+def _group_transactions_by_txid(
+    observed: Sequence[ObservedTx],
+) -> dict[str, list[ObservedTx]]:
     grouped: dict[str, list[ObservedTx]] = {}
     for tx in observed:
         grouped.setdefault(tx.txid, []).append(tx)
@@ -833,8 +879,14 @@ def _detect_prime_ladder_activity(
                 }
             )
 
-        unit_outputs = [entry for entry in entries if _is_close(entry.amount, 1.0, tolerance)]
-        remainders = [entry.amount for entry in entries if not _is_close(entry.amount, 1.0, tolerance)]
+        unit_outputs = [
+            entry for entry in entries if _is_close(entry.amount, 1.0, tolerance)
+        ]
+        remainders = [
+            entry.amount
+            for entry in entries
+            if not _is_close(entry.amount, 1.0, tolerance)
+        ]
         if unit_outputs and remainders:
             register_folds.append(
                 {
@@ -847,7 +899,9 @@ def _detect_prime_ladder_activity(
                 }
             )
 
-        fee_matches = fee is not None and any(_is_close(fee, target, tolerance) for target in fee_targets)
+        fee_matches = fee is not None and any(
+            _is_close(fee, target, tolerance) for target in fee_targets
+        )
         if unit_outputs and fee_matches:
             handshakes.append(
                 {
@@ -878,7 +932,9 @@ def analyze_address_activity(
     """Lightweight analysis stub over observed address activity."""
 
     rpc = DigiByteRPC.from_env()
-    watcher = Watcher(rpc, addresses=addresses, config=EncodingConfig.enigmatic_default())
+    watcher = Watcher(
+        rpc, addresses=addresses, config=EncodingConfig.enigmatic_default()
+    )
     observed: List = []
     for addr in addresses:
         observed.extend(watcher._fetch_address_transactions(addr))  # noqa: SLF001
@@ -987,7 +1043,11 @@ def _decode_dtsp_candidates(candidates: List[dict]) -> dict:
     for current in ordered[1:]:
         previous = segments[-1][-1]
         gap = (current["timestamp"] - previous["timestamp"]).total_seconds()
-        if gap > DTSP_GAP_SECONDS or previous["symbol"] == "END" or current["symbol"] == "START":
+        if (
+            gap > DTSP_GAP_SECONDS
+            or previous["symbol"] == "END"
+            or current["symbol"] == "START"
+        ):
             segments.append([current])
             continue
         segments[-1].append(current)
@@ -1032,7 +1092,10 @@ def _decode_dtsp_candidates(candidates: List[dict]) -> dict:
             }
         )
 
-    return {"raw_values": [entry["value"] for entry in ordered], "decoded_messages": decoded_messages}
+    return {
+        "raw_values": [entry["value"] for entry in ordered],
+        "decoded_messages": decoded_messages,
+    }
 
 
 def handle_address_analysis() -> None:
@@ -1286,7 +1349,9 @@ def handle_unspendable_addresses() -> None:
                 address = unspendable.generate_address(prefix, message)
                 print(f"\n✓ Unspendable address: {address}")
                 print("\n⚠️  WARNING: Do NOT send funds to this address!")
-                print("    This address is provably unspendable - funds sent here are permanently lost.")
+                print(
+                    "    This address is provably unspendable - funds sent here are permanently lost."
+                )
             except ValueError as exc:
                 print(f"Error: {exc}")
 
@@ -1299,13 +1364,17 @@ def handle_unspendable_addresses() -> None:
             print("-" * 32)
 
             address = prompt_str("Address to decode")
-            expect_prefix = prompt_str("Expected prefix (optional, press Enter to skip)", default="")
+            expect_prefix = prompt_str(
+                "Expected prefix (optional, press Enter to skip)", default=""
+            )
 
             try:
                 prefix, message = unspendable.decode_address(address)
 
                 if expect_prefix and prefix != expect_prefix:
-                    print(f"\n⚠️  Warning: Expected prefix '{expect_prefix}' but got '{prefix}'")
+                    print(
+                        f"\n⚠️  Warning: Expected prefix '{expect_prefix}' but got '{prefix}'"
+                    )
 
                 print(f"\n✓ Decoded successfully!")
                 print(f"  Prefix: {prefix}")
@@ -1365,7 +1434,12 @@ def _prompt_multi_line(prompt: str) -> str:
 
 
 def _prompt_back_exit() -> bool:
-    return input("[B] Back | [S] Save plan & exit | Enter to continue: ").strip().lower().startswith("b")
+    return (
+        input("[B] Back | [S] Save plan & exit | Enter to continue: ")
+        .strip()
+        .lower()
+        .startswith("b")
+    )
 
 
 def _render_menu() -> None:
@@ -1462,21 +1536,31 @@ def handle_taproot_wizard() -> None:
 
     rpc.set_wallet(wallet_name)
 
-    ok_info, info = _safe_rpc_call(rpc.getblockchaininfo, friendly_name="RPC connectivity (getblockchaininfo)")
+    ok_info, info = _safe_rpc_call(
+        rpc.getblockchaininfo, friendly_name="RPC connectivity (getblockchaininfo)"
+    )
     if not ok_info:
         _pause()
         return
 
-    ok_wallet, wallet_info = _safe_rpc_call(rpc.getwalletinfo, friendly_name="getwalletinfo")
+    ok_wallet, wallet_info = _safe_rpc_call(
+        rpc.getwalletinfo, friendly_name="getwalletinfo"
+    )
     if not ok_wallet:
         wallets = rpc.listwallets()
         print(f"Loaded wallets: {wallets}")
         if wallet_name not in wallets:
-            choice = input(
-                f"Wallet {wallet_name!r} not loaded. Load now with loadwallet? [y/N]: "
-            ).strip().lower()
+            choice = (
+                input(
+                    f"Wallet {wallet_name!r} not loaded. Load now with loadwallet? [y/N]: "
+                )
+                .strip()
+                .lower()
+            )
             if choice.startswith("y"):
-                _safe_rpc_call(lambda: rpc.loadwallet(wallet_name), friendly_name="loadwallet")
+                _safe_rpc_call(
+                    lambda: rpc.loadwallet(wallet_name), friendly_name="loadwallet"
+                )
                 ok_wallet, wallet_info = _safe_rpc_call(
                     rpc.getwalletinfo, friendly_name="getwalletinfo"
                 )
@@ -1495,7 +1579,9 @@ def handle_taproot_wizard() -> None:
             raw_json = _prompt_multi_line("Enter JSON payload (blank line to finish)")
             try:
                 parsed = json.loads(raw_json)
-                payload_bytes = json.dumps(parsed, separators=(",", ":")).encode("utf-8")
+                payload_bytes = json.dumps(parsed, separators=(",", ":")).encode(
+                    "utf-8"
+                )
             except json.JSONDecodeError as exc:
                 print(f"JSON parse error: {exc}")
                 continue
@@ -1643,24 +1729,38 @@ def handle_taproot_wizard() -> None:
         monitor = False
         print("Transaction already confirmed, skipping monitor.")
     else:
-        monitor = input("Monitor until confirmed? [y/N]: ").strip().lower().startswith("y")
+        monitor = (
+            input("Monitor until confirmed? [y/N]: ").strip().lower().startswith("y")
+        )
     if monitor:
-        threshold_seconds = prompt_int("Auto-bump after how many seconds?", default=120) or 120
-        bump_rate_default = max(prepared.fee_selection.fee_rate_sat_vb, min_floor or 0) + 1000
+        threshold_seconds = (
+            prompt_int("Auto-bump after how many seconds?", default=120) or 120
+        )
+        bump_rate_default = (
+            max(prepared.fee_selection.fee_rate_sat_vb, min_floor or 0) + 1000
+        )
         start = time.time()
         while True:
-            ok_tx, tx_info = _safe_rpc_call(lambda: rpc.gettransaction(txid), friendly_name="gettransaction")
+            ok_tx, tx_info = _safe_rpc_call(
+                lambda: rpc.gettransaction(txid), friendly_name="gettransaction"
+            )
             if ok_tx and isinstance(tx_info, dict):
                 confirmations = tx_info.get("confirmations") or 0
                 if confirmations > 0:
                     confirmed_blockhash = tx_info.get("blockhash")
                     confirmed_height = tx_info.get("blockheight")
-                    print(f"Confirmed in block {confirmed_blockhash} (height {confirmed_height})")
+                    print(
+                        f"Confirmed in block {confirmed_blockhash} (height {confirmed_height})"
+                    )
                     break
             if time.time() - start >= threshold_seconds:
-                bump_choice = input("Unconfirmed. Bump fee now? [y/N]: ").strip().lower()
+                bump_choice = (
+                    input("Unconfirmed. Bump fee now? [y/N]: ").strip().lower()
+                )
                 if bump_choice.startswith("y"):
-                    new_rate_raw = prompt_str("New fee rate (sats/vB)", default=str(int(bump_rate_default)))
+                    new_rate_raw = prompt_str(
+                        "New fee rate (sats/vB)", default=str(int(bump_rate_default))
+                    )
                     try:
                         new_rate = float(new_rate_raw)
                     except ValueError:

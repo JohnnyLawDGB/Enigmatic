@@ -13,7 +13,9 @@ from enigmatic_dgb.ordinals.indexer import OrdinalLocation
 class OrdinalIndexStore:
     """Interface for storing and retrieving inscription payloads."""
 
-    def add_inscription(self, payload: InscriptionPayload, address: str | None = None) -> None:
+    def add_inscription(
+        self, payload: InscriptionPayload, address: str | None = None
+    ) -> None:
         raise NotImplementedError
 
     def get_by_txid(self, txid: str) -> list[InscriptionPayload]:
@@ -22,7 +24,9 @@ class OrdinalIndexStore:
     def all(self, limit: int | None = None) -> list[InscriptionPayload]:
         raise NotImplementedError
 
-    def by_address(self, address: str, limit: int | None = None) -> list[InscriptionPayload]:
+    def by_address(
+        self, address: str, limit: int | None = None
+    ) -> list[InscriptionPayload]:
         raise NotImplementedError
 
 
@@ -56,8 +60,12 @@ class SQLiteOrdinalIndexStore(OrdinalIndexStore):
             )
             """
         )
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inscriptions_address ON inscriptions(address)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inscriptions_height ON inscriptions(height)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_inscriptions_address ON inscriptions(address)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_inscriptions_height ON inscriptions(height)"
+        )
         self.conn.commit()
 
     def close(self) -> None:
@@ -69,9 +77,15 @@ class SQLiteOrdinalIndexStore(OrdinalIndexStore):
     def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - convenience
         self.close()
 
-    def add_inscription(self, payload: InscriptionPayload, address: str | None = None) -> None:
+    def add_inscription(
+        self, payload: InscriptionPayload, address: str | None = None
+    ) -> None:
         metadata = payload.metadata
-        length = metadata.length if metadata.length is not None else len(payload.raw_payload or b"")
+        length = (
+            metadata.length
+            if metadata.length is not None
+            else len(payload.raw_payload or b"")
+        )
         decoded_text = payload.decoded_text
         if decoded_text and len(decoded_text) > 240:
             decoded_text = decoded_text[:240]
@@ -117,7 +131,9 @@ class SQLiteOrdinalIndexStore(OrdinalIndexStore):
         rows = cursor.fetchall()
         return [self._row_to_payload(row) for row in rows]
 
-    def by_address(self, address: str, limit: int | None = None) -> list[InscriptionPayload]:
+    def by_address(
+        self, address: str, limit: int | None = None
+    ) -> list[InscriptionPayload]:
         cursor = self.conn.cursor()
         sql = (
             "SELECT txid, vout, height, protocol, content_type, length, decoded_text, address FROM inscriptions "
@@ -149,7 +165,12 @@ class SQLiteOrdinalIndexStore(OrdinalIndexStore):
             codec=None,
             notes=row["address"],
         )
-        return InscriptionPayload(metadata=metadata, raw_payload=b"", decoded_text=row["decoded_text"], decoded_json=None)
+        return InscriptionPayload(
+            metadata=metadata,
+            raw_payload=b"",
+            decoded_text=row["decoded_text"],
+            decoded_json=None,
+        )
 
 
 __all__ = ["OrdinalIndexStore", "SQLiteOrdinalIndexStore"]

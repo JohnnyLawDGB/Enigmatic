@@ -10,7 +10,9 @@ class SequenceRPC:
     def __init__(self) -> None:
         self._change_index = 0
 
-    def listunspent(self, minconf: int) -> list[dict[str, object]]:  # pragma: no cover - deterministic data
+    def listunspent(
+        self, minconf: int
+    ) -> list[dict[str, object]]:  # pragma: no cover - deterministic data
         return [
             {"txid": "funding-a", "vout": 0, "amount": "250.0", "spendable": True},
             {"txid": "funding-b", "vout": 1, "amount": "125.0", "spendable": True},
@@ -26,7 +28,9 @@ class RecordingBuilder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def send_payment_tx(self, outputs, fee, op_return_data=None, inputs=None, script_plane=None):
+    def send_payment_tx(
+        self, outputs, fee, op_return_data=None, inputs=None, script_plane=None
+    ):
         self.calls.append(
             {
                 "outputs": outputs,

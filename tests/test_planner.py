@@ -78,7 +78,9 @@ class AdvancingRPC(DummyRPC):
 
 class StubBuilder:
     def __init__(self) -> None:
-        self.calls: list[tuple[list[dict[str, int]], dict[str, float], list[str] | None, float]] = []
+        self.calls: list[
+            tuple[list[dict[str, int]], dict[str, float], list[str] | None, float]
+        ] = []
 
     def send_payment_tx(
         self,
@@ -89,7 +91,9 @@ class StubBuilder:
         script_plane=None,
     ) -> str:
         prepared_inputs = list(inputs or [])
-        self.calls.append((prepared_inputs, dict(outputs), op_return_data, fee, script_plane))
+        self.calls.append(
+            (prepared_inputs, dict(outputs), op_return_data, fee, script_plane)
+        )
         return f"stub-tx-{len(self.calls)}"
 
 
@@ -117,7 +121,9 @@ def symbol() -> AutomationSymbol:
     )
 
 
-def test_symbol_planner_plan_distribution(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
+def test_symbol_planner_plan_distribution(
+    automation: AutomationMetadata, symbol: AutomationSymbol
+) -> None:
     rpc = DummyRPC()
     planner = SymbolPlanner(rpc, automation)
     plan = planner.plan(symbol)
@@ -148,7 +154,9 @@ def test_symbol_plan_includes_script_plane(automation: AutomationMetadata) -> No
         outputs=1,
         delta=0,
         sigma=0,
-        script_plane=ScriptPlane(script_type="p2tr", taproot_mode="script_path", branch_id=4),
+        script_plane=ScriptPlane(
+            script_type="p2tr", taproot_mode="script_path", branch_id=4
+        ),
     )
     planner = SymbolPlanner(rpc, automation)
     plan = planner.plan(tap_symbol)
@@ -156,7 +164,9 @@ def test_symbol_plan_includes_script_plane(automation: AutomationMetadata) -> No
     assert rpc.address_types and rpc.address_types[0] == "bech32m"
 
 
-def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
+def test_symbol_planner_broadcast(
+    automation: AutomationMetadata, symbol: AutomationSymbol
+) -> None:
     rpc = DummyRPC()
     planner = SymbolPlanner(rpc, automation)
     plan = planner.plan(symbol)
@@ -168,7 +178,9 @@ def test_symbol_planner_broadcast(automation: AutomationMetadata, symbol: Automa
     assert all(len(entry) == 1 for entry in outputs)
 
 
-def test_symbol_plan_explicit_block_target(automation: AutomationMetadata, symbol: AutomationSymbol) -> None:
+def test_symbol_plan_explicit_block_target(
+    automation: AutomationMetadata, symbol: AutomationSymbol
+) -> None:
     rpc = DummyRPC()
     planner = SymbolPlanner(rpc, automation)
     with pytest.raises(PlanningError):
@@ -186,7 +198,9 @@ def test_symbol_broadcast_waits_for_block_target(
     assert rpc.height >= 99
 
 
-def test_symbol_planner_requires_change_for_cardinality(automation: AutomationMetadata) -> None:
+def test_symbol_planner_requires_change_for_cardinality(
+    automation: AutomationMetadata,
+) -> None:
     rpc = DummyRPC()
     tight_symbol = AutomationSymbol(
         name="TIGHT",
@@ -298,8 +312,22 @@ def test_plan_chain_single_funding_utxo(automation: AutomationMetadata) -> None:
 
     rpc = SingleUTXORPC()
     frames = [
-        AutomationFrame(value=Decimal("2"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
-        AutomationFrame(value=Decimal("1.5"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+        AutomationFrame(
+            value=Decimal("2"),
+            fee=Decimal("0.1"),
+            inputs=1,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
+        AutomationFrame(
+            value=Decimal("1.5"),
+            fee=Decimal("0.1"),
+            inputs=1,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
     ]
     symbol = AutomationSymbol(
         name="CHAIN_SINGLE",
@@ -328,8 +356,22 @@ def test_plan_chain_multiple_funding_utxos(automation: AutomationMetadata) -> No
 
     rpc = MultiUTXORPC()
     frames = [
-        AutomationFrame(value=Decimal("4"), fee=Decimal("0.1"), inputs=2, outputs=2, delta=0, sigma=0),
-        AutomationFrame(value=Decimal("1"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+        AutomationFrame(
+            value=Decimal("4"),
+            fee=Decimal("0.1"),
+            inputs=2,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
+        AutomationFrame(
+            value=Decimal("1"),
+            fee=Decimal("0.1"),
+            inputs=1,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
     ]
     symbol = AutomationSymbol(
         name="CHAIN_MULTI",
@@ -343,7 +385,10 @@ def test_plan_chain_multiple_funding_utxos(automation: AutomationMetadata) -> No
     )
     planner = SymbolPlanner(rpc, automation)
     chain = planner.plan_chain(symbol, receiver="dgb1dest")
-    assert [f"{item.txid}:{item.vout}" for item in chain.initial_utxos] == ["first:0", "second:1"]
+    assert [f"{item.txid}:{item.vout}" for item in chain.initial_utxos] == [
+        "first:0",
+        "second:1",
+    ]
     assert len(chain.transactions[0].inputs) == 2
     assert chain.transactions[1].inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
 
@@ -374,7 +419,9 @@ def test_broadcast_pattern_plan_waits_for_confirmations(monkeypatch) -> None:
             self.tx_conf: dict[str, list[int]] = {}
             self._poll_index: dict[str, int] = {}
 
-        def gettransaction(self, txid: str, include_watchonly: bool = True) -> dict[str, int]:
+        def gettransaction(
+            self, txid: str, include_watchonly: bool = True
+        ) -> dict[str, int]:
             sequence = self.tx_conf.get(txid, [0])
             index = self._poll_index.get(txid, 0)
             value = sequence[min(index, len(sequence) - 1)]
@@ -408,6 +455,7 @@ def test_broadcast_pattern_plan_waits_for_confirmations(monkeypatch) -> None:
     assert rpc._poll_index["stub-tx-1"] >= 3
     assert sleeps == [2.0, 2.0]
 
+
 def test_symbol_planner_chain_links_change(automation: AutomationMetadata) -> None:
     class ChainRPC(DummyRPC):
         def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
@@ -418,9 +466,30 @@ def test_symbol_planner_chain_links_change(automation: AutomationMetadata) -> No
 
     rpc = ChainRPC()
     frames = [
-        AutomationFrame(value=Decimal("2"), fee=Decimal("0.1"), inputs=2, outputs=2, delta=0, sigma=0),
-        AutomationFrame(value=Decimal("3"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
-        AutomationFrame(value=Decimal("5"), fee=Decimal("0.1"), inputs=1, outputs=2, delta=0, sigma=0),
+        AutomationFrame(
+            value=Decimal("2"),
+            fee=Decimal("0.1"),
+            inputs=2,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
+        AutomationFrame(
+            value=Decimal("3"),
+            fee=Decimal("0.1"),
+            inputs=1,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
+        AutomationFrame(
+            value=Decimal("5"),
+            fee=Decimal("0.1"),
+            inputs=1,
+            outputs=2,
+            delta=0,
+            sigma=0,
+        ),
     ]
     symbol = AutomationSymbol(
         name="PRIME_CHAIN",

@@ -41,7 +41,9 @@ def test_cmd_dialect_validate_reports_reserved_marker(tmp_path: Path, capsys) ->
     assert "Reserved marker alignment" in output
 
 
-def test_cmd_dialect_generate_writes_template(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_cmd_dialect_generate_writes_template(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     output_path = tmp_path / "generated.yaml"
     values = [
         "custom-name",
@@ -50,8 +52,14 @@ def test_cmd_dialect_generate_writes_template(tmp_path: Path, monkeypatch, capsy
         "Symbol description",
     ]
 
-    monkeypatch.setattr(cli, "_prompt_str", lambda *_args, default=None: values.pop(0) if values else str(default or ""))
-    monkeypatch.setattr(cli, "_prompt_decimal_sequence", lambda *_args, **__: [Decimal("1.23")])
+    monkeypatch.setattr(
+        cli,
+        "_prompt_str",
+        lambda *_args, default=None: values.pop(0) if values else str(default or ""),
+    )
+    monkeypatch.setattr(
+        cli, "_prompt_decimal_sequence", lambda *_args, **__: [Decimal("1.23")]
+    )
 
     cli.cmd_dialect_generate(SimpleNamespace(output_path=str(output_path), force=True))
 

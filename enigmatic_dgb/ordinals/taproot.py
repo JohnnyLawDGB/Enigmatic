@@ -25,13 +25,17 @@ class TaprootScriptBuilder:
             return b"\x4c" + bytes([length]) + data
         if length <= 520:
             return b"\x4d" + length.to_bytes(2, "little") + data
-        raise ValueError(f"data too large for single script push: {length} bytes (max 520)")
+        raise ValueError(
+            f"data too large for single script push: {length} bytes (max 520)"
+        )
 
     @staticmethod
     def build_enig_leaf(envelope: bytes) -> bytes:
         """Construct OP_FALSE OP_IF <envelope> OP_ENDIF for Enigmatic dialect."""
 
-        return b"".join([b"\x00\x63", TaprootScriptBuilder.push_single_element(envelope), b"\x68"])
+        return b"".join(
+            [b"\x00\x63", TaprootScriptBuilder.push_single_element(envelope), b"\x68"]
+        )
 
 
 @dataclass
@@ -76,7 +80,9 @@ def inspect_output_for_taproot(rpc_client, txid: str, vout: int) -> TaprootScrip
     # DigiByte Core mirrors Bitcoin's naming for Taproot outputs, but we allow a
     # loose match on the type to account for dialect differences.
     script_type_lower = script_pubkey_type.lower() if script_pubkey_type else ""
-    is_declared_taproot = script_type_lower == "witness_v1_taproot" or "taproot" in script_type_lower
+    is_declared_taproot = (
+        script_type_lower == "witness_v1_taproot" or "taproot" in script_type_lower
+    )
     is_taproot_like = bool(is_declared_taproot or (op_1_prefix and has_32_byte_push))
 
     witness_stack: List[str] = []
@@ -92,10 +98,16 @@ def inspect_output_for_taproot(rpc_client, txid: str, vout: int) -> TaprootScrip
             # Best-effort parse: OP_1 (0x51), push 32 (0x20), followed by the
             # x-only internal key. Anything outside this shape is recorded as a
             # TODO for stricter script parsing.
-            if len(script_bytes) >= 34 and script_bytes[0] == 0x51 and script_bytes[1] == 0x20:
+            if (
+                len(script_bytes) >= 34
+                and script_bytes[0] == 0x51
+                and script_bytes[1] == 0x20
+            ):
                 internal_key_hex = script_bytes[2:34].hex()
             else:
-                notes.append("scriptPubKey not in standard OP_1 <32-byte> form; taproot parse skipped")
+                notes.append(
+                    "scriptPubKey not in standard OP_1 <32-byte> form; taproot parse skipped"
+                )
         except ValueError:
             notes.append("scriptPubKey hex could not be decoded; taproot parse skipped")
 
@@ -105,7 +117,9 @@ def inspect_output_for_taproot(rpc_client, txid: str, vout: int) -> TaprootScrip
         try:
             raw = bytes.fromhex(item)
         except ValueError:
-            notes.append("witness item was not valid hex; skipping control-block/script heuristics")
+            notes.append(
+                "witness item was not valid hex; skipping control-block/script heuristics"
+            )
             continue
 
         length = len(raw)
@@ -115,7 +129,11 @@ def inspect_output_for_taproot(rpc_client, txid: str, vout: int) -> TaprootScrip
         # 33 bytes for key-path spends or longer when parity bits and merkle
         # paths are present. This heuristic is intentionally permissive; TODO:
         # tighten validation once full control block parsing is available.
-        if control_block_hex is None and first_byte is not None and 0xC0 <= first_byte <= 0xFF:
+        if (
+            control_block_hex is None
+            and first_byte is not None
+            and 0xC0 <= first_byte <= 0xFF
+        ):
             if length in (33,) or length >= 65:
                 control_block_hex = item
                 continue
