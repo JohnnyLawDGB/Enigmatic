@@ -153,23 +153,38 @@ class DigiByteRPCClient:
                 "and DGB_RPC_* variables (or ~/.enigmatic.yaml) point to the right host and port."
             ) from exc
         try:
-            self._raise_for_status(response)
-        except requests.HTTPError as exc:
-            logger.error(
-                "RPC HTTP error: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG)
-            )
-            raise RPCTransportError(
-                "RPC server returned an HTTP error; check the URL, wallet path, authentication, and DGB_RPC_* settings.",
-                status_code=response.status_code,
-            ) from exc
-        try:
             result = response.json()
         except ValueError as exc:
             logger.debug("RPC JSON parse error: %s", response.text, exc_info=True)
+            try:
+                self._raise_for_status(response)
+            except requests.HTTPError as status_exc:
+                logger.error(
+                    "RPC HTTP error: %s",
+                    status_exc,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+                raise RPCTransportError(
+                    "RPC server returned an HTTP error; check the URL, wallet path, authentication, and DGB_RPC_* settings.",
+                    status_code=response.status_code,
+                ) from status_exc
             raise RPCTransportError("RPC server returned malformed JSON") from exc
         if result.get("error"):
             error = result["error"]
             raise RPCError(error.get("code", -1), error.get("message", "unknown"))
+        if not response.ok:
+            try:
+                self._raise_for_status(response)
+            except requests.HTTPError as exc:
+                logger.error(
+                    "RPC HTTP error: %s",
+                    exc,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+                raise RPCTransportError(
+                    "RPC server returned an HTTP error; check the URL, wallet path, authentication, and DGB_RPC_* settings.",
+                    status_code=response.status_code,
+                ) from exc
         return result.get("result")
 
     def _raise_for_status(self, response: Response) -> None:

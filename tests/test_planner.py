@@ -18,6 +18,7 @@ from enigmatic_dgb.planner import (
     SymbolPlanner,
     broadcast_pattern_plan,
     plan_explicit_pattern,
+    plan_independent_pattern,
 )
 from enigmatic_dgb.script_plane import ScriptPlane
 
@@ -266,6 +267,18 @@ def test_plan_explicit_pattern_builds_outputs() -> None:
     assert first.change_output is not None
     second = plan.steps[1]
     assert second.inputs[0].txid == PREVIOUS_CHANGE_SENTINEL
+
+
+def test_plan_independent_pattern_uses_distinct_inputs() -> None:
+    rpc = DummyRPC()
+    plan = plan_independent_pattern(
+        rpc,
+        to_address="dgb1target",
+        amounts=[Decimal("1.0"), Decimal("1.0")],
+        fee=Decimal("0.1"),
+    )
+    assert len(plan.steps) == 2
+    assert plan.steps[0].inputs[0].txid != plan.steps[1].inputs[0].txid
 
 
 def test_broadcast_pattern_plan_uses_same_stack() -> None:

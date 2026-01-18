@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from enigmatic_dgb import cli
-from enigmatic_dgb.planner import plan_explicit_pattern
+from enigmatic_dgb.planner import plan_independent_pattern
 
 
 class SequenceRPC:
@@ -55,9 +55,9 @@ def test_parse_op_return_args_handles_ascii(ascii_values, expected):
     assert result == expected
 
 
-def test_execute_sequence_plan_attaches_op_return_and_change_chains():
+def test_execute_sequence_plan_attaches_op_return_and_change():
     rpc = SequenceRPC()
-    plan = plan_explicit_pattern(
+    plan = plan_independent_pattern(
         rpc,
         to_address="DTdest",
         amounts=[Decimal("10"), Decimal("5")],
@@ -74,5 +74,4 @@ def test_execute_sequence_plan_attaches_op_return_and_change_chains():
     assert len(first_call["inputs"]) == len(plan.steps[0].inputs)
     second_call = builder.calls[1]
     assert second_call["op_return"] == ["bb"]
-    assert second_call["inputs"][0]["txid"] == "txid-1"
-    assert second_call["inputs"][0]["vout"] == 1
+    assert second_call["inputs"][0]["txid"] == "funding-b"

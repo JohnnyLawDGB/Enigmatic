@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Mapping, Sequence
 
 import yaml
 
-from .rpc_client import DigiByteRPC
+from .rpc_client import DigiByteRPC, RPCError
 from .script_plane import ScriptPlane, parse_script_plane_block
 from .tx_builder import TransactionBuilder
 
@@ -686,6 +686,7 @@ def plan_explicit_pattern(
     min_confirmations: int = 1,
     script_plane: ScriptPlane | None = None,
     preferred_utxos: Sequence[Mapping[str, Any]] | None = None,
+    allow_unconfirmed_chain: bool = False,
 ) -> PatternPlanSequence:
     if not amounts:
         raise PlanningError("At least one output amount must be provided")
@@ -714,6 +715,29 @@ def plan_explicit_pattern(
                 raise PlanningError(
                     f"Selected UTXO {entry.get('txid')}:{entry.get('vout')} "
                     f"only has {confirmations} confirmations (requires {min_confirmations})"
+                )
+    if min_confirmations == 0 and not allow_unconfirmed_chain:
+        if preferred_utxos is not None:
+            for entry in utxos:
+                confirmations = int(entry.get("confirmations", 0) or 0)
+                if confirmations < 1:
+                    raise PlanningError(
+                        "Chained sequences require confirmed funding UTXOs to avoid ancestor-chain delays. "
+                        f"Unconfirmed inputs selected: {entry.get('txid')}:{entry.get('vout')}. "
+                        "Fund the wallet or allow unconfirmed funding."
+                    )
+        else:
+            confirmed = [
+                entry
+                for entry in utxos
+                if int(entry.get("confirmations", 1) or 1) >= 1
+            ]
+            if confirmed:
+                utxos = confirmed
+            else:
+                raise PlanningError(
+                    "Chained sequences require confirmed funding UTXOs to avoid ancestor-chain delays. "
+                    "Fund the wallet or allow unconfirmed funding."
                 )
     selected, total = _select_utxos_covering_total(utxos, required_total)
     pattern_inputs = [
@@ -783,6 +807,107 @@ def plan_explicit_pattern(
             )
         )
         pending_change_amount = change_amount
+    return PatternPlanSequence(steps=steps)
+
+
+def plan_independent_pattern(
+    rpc: DigiByteRPC,
+    *,
+    to_address: str,
+    amounts: Sequence[Decimal],
+    fee: Decimal,
+    min_confirmations: int = 1,
+    script_plane: ScriptPlane | None = None,
+    preferred_utxos: Sequence[Mapping[str, Any]] | None = None,
+    allow_unconfirmed_chain: bool = False,
+) -> PatternPlanSequence:
+    """Plan a non-chained pattern where each step uses independent inputs."""
+
+    if not amounts:
+        raise PlanningError("At least one output amount must be provided")
+    normalized_amounts: list[Decimal] = []
+    for amount in amounts:
+        if amount <= 0:
+            raise PlanningError("Each output amount must be greater than zero")
+        normalized_amounts.append(amount.quantize(EIGHT_DP, rounding=ROUND_DOWN))
+    if fee < 0:
+        raise PlanningError("Fee must be non-negative")
+
+    utxos = (
+        list(preferred_utxos)
+        if preferred_utxos is not None
+        else rpc.listunspent(min_confirmations)
+    )
+    if preferred_utxos is not None and min_confirmations > 0:
+        for entry in utxos:
+            confirmations = int(entry.get("confirmations", 0) or 0)
+            if confirmations < min_confirmations:
+                raise PlanningError(
+                    f"Selected UTXO {entry.get('txid')}:{entry.get('vout')} "
+                    f"only has {confirmations} confirmations (requires {min_confirmations})"
+                )
+    if min_confirmations == 0 and not allow_unconfirmed_chain:
+        if preferred_utxos is not None:
+            for entry in utxos:
+                confirmations = int(entry.get("confirmations", 0) or 0)
+                if confirmations < 1:
+                    raise PlanningError(
+                        "Independent sequences require confirmed funding UTXOs to avoid mempool delays. "
+                        f"Unconfirmed inputs selected: {entry.get('txid')}:{entry.get('vout')}. "
+                        "Fund the wallet or allow unconfirmed funding."
+                    )
+        else:
+            confirmed = [
+                entry
+                for entry in utxos
+                if int(entry.get("confirmations", 1) or 1) >= 1
+            ]
+            if confirmed:
+                utxos = confirmed
+            else:
+                raise PlanningError(
+                    "Independent sequences require confirmed funding UTXOs to avoid mempool delays. "
+                    "Fund the wallet or allow unconfirmed funding."
+                )
+
+    available_utxos = list(utxos)
+    steps: list[PatternPlan] = []
+    for amount in normalized_amounts:
+        required_total = amount + fee
+        selected, total = _select_utxos_covering_total(available_utxos, required_total)
+        for entry in selected:
+            available_utxos.remove(entry)
+        step_inputs = [
+            PatternInput(
+                txid=str(entry["txid"]),
+                vout=int(entry["vout"]),
+                amount=Decimal(str(entry["amount"])),
+            )
+            for entry in selected
+        ]
+        change_amount = (total - amount - fee).quantize(
+            EIGHT_DP, rounding=ROUND_DOWN
+        )
+        if change_amount < 0:
+            raise PlanningError("Insufficient funds for requested pattern amounts")
+        change_output: PatternOutput | None = None
+        if change_amount > 0:
+            if change_amount < DUST_LIMIT:
+                raise PlanningError(
+                    "Change would fall below dust limit; adjust fee or use different UTXOs"
+                )
+            change_output = PatternOutput(
+                address=rpc.getrawchangeaddress(), amount=change_amount
+            )
+        steps.append(
+            PatternPlan(
+                inputs=step_inputs,
+                outputs=[PatternOutput(address=to_address, amount=amount)],
+                change_output=change_output,
+                fee=fee,
+                script_plane=script_plane,
+            )
+        )
     return PatternPlanSequence(steps=steps)
 
 
@@ -906,8 +1031,16 @@ def broadcast_pattern_plan(
                     max_wait_seconds,
                     progress_callback,
                 )
-            elif wait_between_txs > 0:
-                time.sleep(wait_between_txs)
+            else:
+                _wait_for_mempool_entry(
+                    rpc,
+                    txid,
+                    index,
+                    max_wait_seconds,
+                    progress_callback,
+                )
+                if wait_between_txs > 0:
+                    time.sleep(wait_between_txs)
     return txids
 
 
@@ -958,6 +1091,36 @@ def _wait_for_confirmations(
             raise PlanningError(
                 f"Tx{tx_index} did not reach {required_confirmations} confirmations "
                 f"within {max_wait_seconds} seconds"
+            )
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+
+def _wait_for_mempool_entry(
+    rpc: DigiByteRPC,
+    txid: str,
+    tx_index: int,
+    max_wait_seconds: float | None,
+    progress_callback: ProgressCallback | None,
+) -> None:
+    poll_interval = 2.0
+    waited = 0.0
+    while True:
+        try:
+            rpc.getmempoolentry(txid)
+            if progress_callback is not None:
+                progress_callback(f"Tx{tx_index}: seen in mempool")
+            return
+        except RPCError as exc:
+            if "mempool" not in str(exc).lower():
+                raise PlanningError(
+                    f"Tx{tx_index}: mempool check failed ({exc})"
+                ) from exc
+        if progress_callback is not None:
+            progress_callback(f"Tx{tx_index}: waiting for mempool entry")
+        if max_wait_seconds is not None and waited >= max_wait_seconds:
+            raise PlanningError(
+                f"Tx{tx_index} did not enter the mempool within {max_wait_seconds} seconds"
             )
         time.sleep(poll_interval)
         waited += poll_interval

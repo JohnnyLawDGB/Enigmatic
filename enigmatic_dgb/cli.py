@@ -54,6 +54,7 @@ from .planner import (
     SymbolPlanner,
     broadcast_pattern_plan,
     plan_explicit_pattern,
+    plan_independent_pattern,
     PREVIOUS_CHANGE_SENTINEL,
 )
 from .ordinals import (
@@ -864,6 +865,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=600.0,
         help="Maximum time to wait for confirmations before aborting (default: 600)",
     )
+    pattern_parser.add_argument(
+        "--allow-unconfirmed-chain",
+        action="store_true",
+        help="Permit patterns to use unconfirmed funding UTXOs",
+    )
+    pattern_parser.add_argument(
+        "--chained",
+        action="store_true",
+        help="Use a chained change output instead of independent funding",
+    )
 
     list_utxos_parser = subparsers.add_parser(
         "list-utxos",
@@ -1391,13 +1402,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     send_sequence_parser = subparsers.add_parser(
         "send-sequence",
-        help="Send an explicit chained payment sequence",
+        help="Send an explicit payment sequence using independent UTXOs",
     )
     _configure_sequence_parser(send_sequence_parser, include_mode_flags=True)
 
     plan_sequence_parser = subparsers.add_parser(
         "plan-sequence",
-        help="Inspect a chained payment sequence without broadcasting",
+        help="Inspect a payment sequence without broadcasting",
     )
     _configure_sequence_parser(plan_sequence_parser, include_mode_flags=False)
 
@@ -1490,6 +1501,16 @@ def _configure_sequence_parser(
     parser.add_argument(
         "--op-return-ascii",
         help="Comma-separated list of OP_RETURN payloads encoded as ASCII",
+    )
+    parser.add_argument(
+        "--allow-unconfirmed-chain",
+        action="store_true",
+        help="Permit sequences to use unconfirmed funding UTXOs",
+    )
+    parser.add_argument(
+        "--chained",
+        action="store_true",
+        help="Use chained change outputs instead of independent funding",
     )
     if include_mode_flags:
         parser.add_argument(
@@ -2800,13 +2821,15 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
-    plan = plan_explicit_pattern(
+    planner_fn = plan_explicit_pattern if args.chained else plan_independent_pattern
+    plan = planner_fn(
         rpc,
         to_address=args.to_address,
         amounts=amounts,
         fee=fee,
         min_confirmations=args.min_confirmations,
         preferred_utxos=selected_utxos or None,
+        allow_unconfirmed_chain=args.allow_unconfirmed_chain,
     )
     print(json.dumps(plan.to_jsonable(), indent=2))
     if args.broadcast:
@@ -2906,13 +2929,15 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
-    plan = plan_explicit_pattern(
+    planner_fn = plan_explicit_pattern if args.chained else plan_independent_pattern
+    plan = planner_fn(
         rpc,
         to_address=args.to_address,
         amounts=amounts,
         fee=fee,
         min_confirmations=args.min_confirmations,
         preferred_utxos=selected_utxos or None,
+        allow_unconfirmed_chain=args.allow_unconfirmed_chain or args.single_tx,
     )
     is_dry_run = getattr(args, "dry_run", False) or args.command == "plan-sequence"
     if is_dry_run:
