@@ -2926,6 +2926,7 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
         op_returns=op_returns,
         wait_between_txs=args.wait_between_txs,
         min_confirmations_between_steps=args.min_confirmations_between_steps,
+        min_confirmations=args.min_confirmations,
         max_wait_seconds=args.max_wait_seconds,
         progress_callback=_stdout_progress,
         builder=builder,

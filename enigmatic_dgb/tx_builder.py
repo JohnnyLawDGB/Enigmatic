@@ -285,6 +285,7 @@ class TransactionBuilder:
         fee: float,
         op_return_data: list[str] | None = None,
         script_plane: ScriptPlane | None = None,
+        min_confirmations: int = 1,
     ) -> str:
         """Build and broadcast a single payment transaction with many outputs."""
 
@@ -304,7 +305,7 @@ class TransactionBuilder:
 
         total_output = sum(float(amount) for amount in amounts)
         selected_utxos, change_amount = self.utxo_manager.select_utxos(
-            total_output, fee
+            total_output, fee, min_confirmations=min_confirmations
         )
 
         tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]

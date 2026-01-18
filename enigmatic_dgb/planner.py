@@ -793,6 +793,7 @@ def broadcast_pattern_plan(
     op_returns: Sequence[str | None] | None = None,
     wait_between_txs: float = 0.0,
     min_confirmations_between_steps: int = 0,
+    min_confirmations: int = 1,
     max_wait_seconds: float | None = None,
     progress_callback: ProgressCallback | None = None,
     builder: TransactionBuilder | None = None,
@@ -855,6 +856,7 @@ def broadcast_pattern_plan(
             float(fanout_fee),
             op_return_data=payload_list,
             script_plane=script_plane,
+            min_confirmations=min_confirmations,
         )
         txids.append(txid)
         if progress_callback is not None:
