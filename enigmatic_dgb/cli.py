@@ -1164,6 +1164,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Minimum fee rate floor in sat/vB applied after estimation",
     )
+    ord_inscribe_parser.add_argument(
+        "--min-confirmations",
+        type=int,
+        default=1,
+        help="Minimum confirmations required for funding UTXOs (default: 1)",
+    )
     ord_inscribe_parser.set_defaults(broadcast=False, rbf=True)
 
     ord_reveal_parser = subparsers.add_parser(
@@ -2538,6 +2544,7 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
                 float(guess_fee_dgb),
                 fee_rate_override=fee_rate_override,
                 replaceable=args.rbf,
+                min_confirmations=args.min_confirmations,
             )
     except RuntimeError as exc:
         raise CLIError(

@@ -191,6 +191,7 @@ class TransactionBuilder:
         inputs: List[Dict[str, Any]] | None = None,
         fee_rate_override: float | None = None,
         replaceable: bool | None = None,
+        min_confirmations: int | None = None,
     ) -> str:
         """Build and sign a transaction using preformatted outputs.
 
@@ -227,7 +228,14 @@ class TransactionBuilder:
                 # "data" (for OP_RETURN). Do not use "script" or other metadata keys here.
                 tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
                 options = self._build_fund_options(
-                    fee, fee_rate_override=fee_rate_override, replaceable=replaceable
+                    fee,
+                    fee_rate_override=fee_rate_override,
+                    replaceable=replaceable,
+                    options=(
+                        {"minconf": min_confirmations}
+                        if min_confirmations is not None
+                        else None
+                    ),
                 )
                 funded = self.rpc.fundrawtransaction(tmp_raw, options)
                 raw_tx = funded["hex"]
