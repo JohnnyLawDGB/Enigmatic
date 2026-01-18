@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Iterable, List, Protocol
+from typing import Callable, List, Protocol
 
 from .actions import ActionRequest
 from .events import AgentEvent
@@ -22,9 +22,20 @@ class Rule(Protocol):
 
 
 @dataclass
+@dataclass
+class RuleEngineMetrics:
+    rules_evaluated: int = 0
+    rules_failed: int = 0
+    rules_debounced: int = 0
+    actions_generated: int = 0
+
+
+@dataclass
 class RuleEngine:
     rules: List[Rule]
     debounce_seconds: int = 30
+    on_rule_error: Callable[[Rule, Exception], None] | None = None
+    metrics: RuleEngineMetrics = field(default_factory=RuleEngineMetrics)
     _last_fired: dict[str, datetime] = field(default_factory=dict, init=False)
 
     def evaluate(self, event: AgentEvent, state: AgentStateStore) -> List[ActionRequest]:
@@ -32,11 +43,20 @@ class RuleEngine:
         for rule in self.rules:
             key = rule.debounce_key(event)
             if self._is_debounced(key, event.occurred_at):
+                self.metrics.rules_debounced += 1
                 continue
-            rule_actions = rule.evaluate(event, state)
+            self.metrics.rules_evaluated += 1
+            try:
+                rule_actions = rule.evaluate(event, state)
+            except Exception as exc:  # pragma: no cover - defensive
+                self.metrics.rules_failed += 1
+                if self.on_rule_error:
+                    self.on_rule_error(rule, exc)
+                continue
             if rule_actions:
                 self._last_fired[key] = event.occurred_at
                 actions.extend(rule_actions)
+                self.metrics.actions_generated += len(rule_actions)
         return actions
 
     def _is_debounced(self, key: str, occurred_at: datetime) -> bool:

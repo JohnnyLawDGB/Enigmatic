@@ -565,6 +565,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object describing optional payload flags",
     )
     send_parser.add_argument(
+        "--fee",
+        default=None,
+        help="Override the per-transaction fee punctuation (default: config value)",
+    )
+    send_parser.add_argument(
         "--encrypt-with-passphrase",
         default=None,
         help="Optional shared secret used to encrypt the message payload",
@@ -825,8 +830,8 @@ def build_parser() -> argparse.ArgumentParser:
     pattern_parser.add_argument(
         "--min-confirmations-between-steps",
         type=int,
-        default=0,
-        help="Confirmations required between chained steps (default: 0)",
+        default=1,
+        help="Confirmations required between chained steps (default: 1)",
     )
     pattern_parser.add_argument(
         "--use-utxos",
@@ -1307,8 +1312,8 @@ def build_parser() -> argparse.ArgumentParser:
     chain_parser.add_argument(
         "--min-confirmations-between-steps",
         type=int,
-        default=0,
-        help="Confirmations required between chained frames (default: 0)",
+        default=1,
+        help="Confirmations required between chained frames (default: 1)",
     )
     chain_parser.add_argument(
         "--max-wait-seconds",
@@ -1395,8 +1400,8 @@ def _configure_sequence_parser(
     parser.add_argument(
         "--min-confirmations-between-steps",
         type=int,
-        default=0,
-        help="Confirmations required between chained steps (default: 0)",
+        default=1,
+        help="Confirmations required between chained steps (default: 1)",
     )
     parser.add_argument(
         "--max-wait-seconds",
@@ -1795,6 +1800,14 @@ def cmd_send_message(args: argparse.Namespace) -> None:
 
     rpc = _rpc_client()
     config = EncodingConfig.enigmatic_default()
+    if args.fee is not None:
+        fee_override = float(_parse_decimal(args.fee, "--fee"))
+        config = EncodingConfig(
+            anchor_amounts=config.anchor_amounts,
+            micro_amounts=config.micro_amounts,
+            fee_punctuation=fee_override,
+            packet_max_interval_seconds=config.packet_max_interval_seconds,
+        )
     encoder = EnigmaticEncoder(config, target_address=args.to_address)
     instructions, fee = encoder.encode_message(
         message, encrypt_with_passphrase=args.encrypt_with_passphrase

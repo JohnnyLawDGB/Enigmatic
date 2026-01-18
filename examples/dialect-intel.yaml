@@ -4,6 +4,7 @@ description: >-
   INTEL dialect modeled after the DigiByte captures around height 15,558,700.
   It keeps the 0.21 DGB fee invariant while weaving 217 / 152 / 352 / 866
   anchors into programmable symbols for the enigmatic_rpc helper.
+fee_punctuation: 0.21
 planes:
   value:
     - header: 217.0

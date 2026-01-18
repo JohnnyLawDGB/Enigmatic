@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from enigmatic_dgb.agent.actions import (
@@ -98,6 +99,52 @@ def test_state_store_persists_state(tmp_path) -> None:
     history = reloaded.get_action_history(1)
     assert history[0].action_id == action.action_id
     assert history[0].details["message_id"] == "note-1"
+
+
+def test_state_load_quarantines_corrupt_file(tmp_path) -> None:
+    persist_path = tmp_path / "agent_state.json"
+    persist_path.write_text("{invalid-json", encoding="utf-8")
+
+    store = AgentStateStore(persist_path=persist_path)
+    assert store.get_recent_events() == []
+    assert not persist_path.exists()
+    quarantined = list(tmp_path.glob("agent_state.json.corrupt-*"))
+    assert quarantined
+
+
+def test_state_load_falls_back_to_temp(tmp_path) -> None:
+    persist_path = tmp_path / "agent_state.json"
+    persist_path.write_text("{invalid-json", encoding="utf-8")
+    temp_path = persist_path.with_suffix(persist_path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps({"preferences": {"alert_threshold": 9}}),
+        encoding="utf-8",
+    )
+
+    store = AgentStateStore(persist_path=persist_path)
+    assert store.get_preferences()["alert_threshold"] == 9
+    assert persist_path.exists()
+
+
+def test_state_load_skips_invalid_entries(tmp_path) -> None:
+    persist_path = tmp_path / "agent_state.json"
+    persist_path.write_text(
+        json.dumps(
+            {
+                "events": [{"event_id": "missing-fields"}],
+                "pending_actions": [{"action_id": "missing-fields"}],
+                "action_history": [{"action_id": "missing-fields"}],
+                "preferences": {"alert_threshold": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = AgentStateStore(persist_path=persist_path)
+    assert store.get_recent_events() == []
+    assert store.list_pending_actions() == []
+    assert store.get_action_history() == []
+    assert store.get_preferences()["alert_threshold"] == 4
 
 
 def test_event_processor_and_rules() -> None:

@@ -49,7 +49,7 @@ symbols:
       tags: [digibyte, digishield]
       note: "Tight pulses to mirror quick difficulty adjustments."
   digiswarm_burst:
-    description: Swarm/fan-out burst: one anchor and five tiny micro shards to mimic many-output behavior without hard-coded addresses.
+    description: "Swarm/fan-out burst: one anchor and five tiny micro shards to mimic many-output behavior without hard-coded addresses."
     intent: swarm
     anchors: [0.11]
     micros: [0.011, 0.011, 0.011, 0.011, 0.011]

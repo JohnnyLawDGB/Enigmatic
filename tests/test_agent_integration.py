@@ -113,3 +113,43 @@ def test_monitor_runs_processor() -> None:
     handled = monitor.run_once()
     assert len(handled) == 1
     assert state.is_event_processed(handled[0].event_id) is True
+    assert monitor.metrics.polls == 1
+    assert monitor.metrics.events_seen == 1
+    assert monitor.metrics.events_processed == 1
+
+
+def test_queue_event_source_drop_oldest() -> None:
+    source = QueueEventSource(max_queue_size=2, drop_strategy="drop_oldest")
+    source.push(AgentEvent.create(event_type="a", source="demo"))
+    source.push(AgentEvent.create(event_type="b", source="demo"))
+    source.push(AgentEvent.create(event_type="c", source="demo"))
+    events = source.poll()
+    assert [event.event_type for event in events] == ["b", "c"]
+    assert source.dropped_count == 1
+
+
+def test_queue_event_source_drop_newest() -> None:
+    source = QueueEventSource(max_queue_size=2, drop_strategy="drop_newest")
+    source.push(AgentEvent.create(event_type="a", source="demo"))
+    source.push(AgentEvent.create(event_type="b", source="demo"))
+    source.push(AgentEvent.create(event_type="c", source="demo"))
+    events = source.poll()
+    assert [event.event_type for event in events] == ["a", "b"]
+    assert source.dropped_count == 1
+
+
+def test_monitor_limits_events_per_poll() -> None:
+    state = AgentStateStore()
+    processor = EventProcessor(state, RuleEngine([]))
+    source = QueueEventSource(
+        [
+            AgentEvent.create(event_type="a", source="demo"),
+            AgentEvent.create(event_type="b", source="demo"),
+            AgentEvent.create(event_type="c", source="demo"),
+        ]
+    )
+    monitor = EventMonitor(source, processor, max_events_per_poll=2)
+
+    handled = monitor.run_once()
+    assert len(handled) == 2
+    assert monitor.metrics.events_seen == 2

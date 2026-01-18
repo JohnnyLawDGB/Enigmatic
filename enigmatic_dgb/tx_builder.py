@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .rpc_client import DigiByteRPC, RPCError
 from .script_plane import ScriptPlane
-from .fees import sat_vb_to_dgb_per_kvb
 from .fees import sat_vb_to_dgb_per_kvb
 
 logger = logging.getLogger(__name__)
@@ -353,16 +353,28 @@ class TransactionBuilder:
         """Return outputs formatted as an array of single-key objects for RPC."""
 
         if isinstance(outputs_payload, dict):
-            return [{addr: amount} for addr, amount in outputs_payload.items()]
+            return [
+                {addr: TransactionBuilder._normalize_output_amount(addr, amount)}
+                for addr, amount in outputs_payload.items()
+            ]
 
         formatted: list[Dict[str, Any]] = []
         for entry in outputs_payload:
             if len(entry) == 1:
-                formatted.append(entry)
+                key, value = next(iter(entry.items()))
+                formatted.append(
+                    {key: TransactionBuilder._normalize_output_amount(key, value)}
+                )
                 continue
 
             if "address" in entry and "amount" in entry:
-                formatted.append({entry["address"]: entry["amount"]})
+                formatted.append(
+                    {
+                        entry["address"]: TransactionBuilder._normalize_output_amount(
+                            entry["address"], entry["amount"]
+                        )
+                    }
+                )
                 continue
 
             if "script" in entry:
@@ -375,6 +387,18 @@ class TransactionBuilder:
             )
 
         return formatted
+
+    @staticmethod
+    def _normalize_output_amount(key: str, value: Any) -> Any:
+        if key == "data":
+            return value
+        try:
+            quantized = Decimal(str(value)).quantize(
+                Decimal("0.00000001"), rounding=ROUND_DOWN
+            )
+        except (InvalidOperation, TypeError, ValueError):
+            return value
+        return float(quantized)
 
     @staticmethod
     def _estimate_fee_rate(fee: float, assumed_vbytes: int = 250) -> float:

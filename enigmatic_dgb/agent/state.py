@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,9 @@ from .actions import (
 )
 from .audit import AuditLogger
 from .events import AgentEvent, event_from_dict, event_to_dict
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentStateStore:
@@ -158,23 +162,102 @@ class AgentStateStore:
     def load(self) -> None:
         if not self._persist_path:
             return
-        raw = json.loads(self._persist_path.read_text(encoding="utf-8"))
+        raw = self._load_snapshot()
+        if raw is None:
+            return
         self._events.clear()
-        for event_data in raw.get("events", []):
-            self._events.append(event_from_dict(event_data))
-        self._processed_event_ids = set(raw.get("processed_event_ids", []))
+        for event_data in self._safe_list(raw.get("events")):
+            try:
+                self._events.append(event_from_dict(event_data))
+            except Exception:  # pragma: no cover - defensive parsing
+                logger.debug("Skipping invalid event entry: %s", event_data)
+        self._processed_event_ids = {
+            str(item) for item in self._safe_list(raw.get("processed_event_ids"))
+        }
         self._pending_actions.clear()
-        for action_data in raw.get("pending_actions", []):
-            action = action_request_from_dict(action_data)
+        for action_data in self._safe_list(raw.get("pending_actions")):
+            try:
+                action = action_request_from_dict(action_data)
+            except Exception:  # pragma: no cover - defensive parsing
+                logger.debug("Skipping invalid pending action: %s", action_data)
+                continue
             self._pending_actions[action.action_id] = action
         self._action_history.clear()
-        for result_data in raw.get("action_history", []):
-            self._action_history.append(action_result_from_dict(result_data))
-        self._preferences = dict(raw.get("preferences", {}))
+        for result_data in self._safe_list(raw.get("action_history")):
+            try:
+                result = action_result_from_dict(result_data)
+            except Exception:  # pragma: no cover - defensive parsing
+                logger.debug("Skipping invalid action history: %s", result_data)
+                continue
+            self._action_history.append(result)
+        self._preferences = self._safe_dict(raw.get("preferences"))
 
     def _persist_if_enabled(self) -> None:
         if self._persist_path and self._auto_persist:
             self.save()
+
+    def _load_snapshot(self) -> dict[str, Any] | None:
+        if not self._persist_path:
+            return None
+        temp_path = self._persist_path.with_suffix(
+            self._persist_path.suffix + ".tmp"
+        )
+        raw = self._read_json_file(self._persist_path)
+        if raw is not None:
+            return raw
+        if temp_path.exists():
+            raw = self._read_json_file(temp_path)
+            if raw is not None:
+                logger.warning(
+                    "Recovered state from temp file %s", temp_path.as_posix()
+                )
+                try:
+                    temp_path.replace(self._persist_path)
+                except OSError:
+                    logger.debug("Failed to promote temp state file.")
+                return raw
+        self._quarantine_corrupt()
+        return None
+
+    def _read_json_file(self, path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read state file %s: %s", path.as_posix(), exc)
+            return None
+        if not isinstance(data, dict):
+            logger.warning("State file %s does not contain a JSON object", path.as_posix())
+            return None
+        return data
+
+    def _quarantine_corrupt(self) -> None:
+        if not self._persist_path or not self._persist_path.exists():
+            return
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        corrupt_path = self._persist_path.with_suffix(
+            self._persist_path.suffix + f".corrupt-{timestamp}"
+        )
+        try:
+            self._persist_path.replace(corrupt_path)
+            logger.warning(
+                "Quarantined corrupt state file to %s", corrupt_path.as_posix()
+            )
+        except OSError:
+            logger.debug("Failed to quarantine corrupt state file.")
+
+    @staticmethod
+    def _safe_list(value: Any) -> List[Any]:
+        if isinstance(value, list):
+            return value
+        return []
+
+    @staticmethod
+    def _safe_dict(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
 
     def to_debug_dict(self) -> Dict[str, Any]:
         return {

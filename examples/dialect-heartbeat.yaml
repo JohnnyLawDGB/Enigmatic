@@ -1,5 +1,9 @@
 name: heartbeat
 version: 0.1.0
+description: >-
+  Heartbeat dialect for simple frame synchronization and presence signaling.
+  Uses a 0.21 DGB fee punctuation with optional jitter bands.
+fee_punctuation: 0.21
 planes:
   value:
     - header: 21.21
