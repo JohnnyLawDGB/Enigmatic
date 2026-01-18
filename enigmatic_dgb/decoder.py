@@ -83,9 +83,25 @@ class EnigmaticDecoder:
             payload["op_return"] = (
                 op_return_hints[0] if len(op_return_hints) == 1 else op_return_hints
             )
+            intent_hint = self._first_hint_value(op_return_hints, "intent")
+            if isinstance(intent_hint, str) and intent_hint:
+                intent = intent_hint
+            channel_hint = self._first_hint_value(op_return_hints, "channel")
+            if isinstance(channel_hint, str) and channel_hint:
+                channel = channel_hint
+            for key in ("reply_to", "correlation_id", "sequence", "total"):
+                hint_value = self._first_hint_value(op_return_hints, key)
+                if hint_value is not None:
+                    payload[key] = hint_value
+        message_id_hint = self._first_hint_value(op_return_hints, "id")
+        message_id = (
+            message_id_hint
+            if isinstance(message_id_hint, str) and message_id_hint
+            else str(uuid.uuid4())
+        )
 
         message = EnigmaticMessage(
-            id=str(uuid.uuid4()),
+            id=message_id,
             timestamp=min(tx.timestamp for tx in packet),
             channel=channel,
             intent=intent,
@@ -143,3 +159,10 @@ class EnigmaticDecoder:
             if isinstance(decoded, dict):
                 hints.append(decoded)
         return hints
+
+    @staticmethod
+    def _first_hint_value(hints: list[dict[str, Any]], key: str) -> Any:
+        for hint in hints:
+            if key in hint:
+                return hint[key]
+        return None

@@ -36,6 +36,8 @@ def prepare_symbol_send(
     encrypt_with_passphrase: str | None = None,
     session: SessionContext | None = None,
     fee_override: float | None = None,
+    message_id: str | None = None,
+    op_return_metadata: dict[str, Any] | None = None,
 ) -> tuple[EnigmaticMessage, list[SpendInstruction], float]:
     """Return the message metadata and spend instructions for a symbol send."""
 
@@ -73,6 +75,8 @@ def prepare_symbol_send(
         channel=channel,
         extra_payload=extra_payload,
         encrypt_with_passphrase=encrypt_passphrase,
+        message_id=message_id,
+        op_return_metadata=op_return_metadata,
     )
     if not instructions:
         raise RuntimeError("Symbol encoding produced no spend instructions")
@@ -89,6 +93,8 @@ def send_symbol(
     encrypt_with_passphrase: str | None = None,
     session: SessionContext | None = None,
     fee_override: float | None = None,
+    message_id: str | None = None,
+    op_return_metadata: dict[str, Any] | None = None,
 ) -> list[str]:
     """Encode and broadcast a dialect symbol using :class:`TransactionBuilder`."""
 
@@ -101,6 +107,8 @@ def send_symbol(
         encrypt_with_passphrase=encrypt_with_passphrase,
         session=session,
         fee_override=fee_override,
+        message_id=message_id,
+        op_return_metadata=op_return_metadata,
     )
 
     outputs, op_returns = aggregate_spend_instructions(instructions)
@@ -124,6 +132,8 @@ def load_and_send_symbol(
     encrypt_with_passphrase: str | None = None,
     session: SessionContext | None = None,
     fee_override: float | None = None,
+    message_id: str | None = None,
+    op_return_metadata: dict[str, Any] | None = None,
 ) -> list[str]:
     """Convenience wrapper that loads a dialect from disk then sends the symbol."""
 
@@ -138,6 +148,8 @@ def load_and_send_symbol(
         encrypt_with_passphrase=encrypt_with_passphrase,
         session=session,
         fee_override=fee_override,
+        message_id=message_id,
+        op_return_metadata=op_return_metadata,
     )
 
 

@@ -94,6 +94,57 @@ def test_decoder_includes_op_return_hint() -> None:
     assert message.payload["op_return"]["hint"] == "demo"
 
 
+def test_encoder_includes_op_return_metadata() -> None:
+    config = EncodingConfig.enigmatic_default()
+    message = EnigmaticMessage(
+        id="test",
+        timestamp=datetime.now(timezone.utc),
+        channel="default",
+        intent="identity",
+        payload={},
+    )
+    encoder = EnigmaticEncoder(config, target_address="dgb1test")
+    instructions, _ = encoder.encode_message(
+        message,
+        op_return_metadata={"reply_to": "r1", "correlation_id": "c1"},
+    )
+
+    op_return = next(
+        instr.op_return_data for instr in instructions if instr.op_return_data
+    )
+    decoded = json.loads(op_return.decode("utf-8"))
+    assert decoded["reply_to"] == "r1"
+    assert decoded["correlation_id"] == "c1"
+
+
+def test_decoder_uses_op_return_hints_for_identity() -> None:
+    config = EncodingConfig.enigmatic_default()
+    decoder = EnigmaticDecoder(config)
+    hint = json.dumps(
+        {
+            "id": "msg-123",
+            "intent": "presence",
+            "channel": "ops",
+            "reply_to": "dgb1reply",
+        }
+    ).encode("utf-8")
+    packet = [
+        ObservedTx(
+            txid="hint",
+            timestamp=datetime.now(timezone.utc),
+            amount=config.anchor_amounts[0],
+            op_return_data=hint,
+        )
+    ]
+
+    message = decoder.decode_packet(packet, channel="default")
+
+    assert message.id == "msg-123"
+    assert message.intent == "presence"
+    assert message.channel == "ops"
+    assert message.payload["reply_to"] == "dgb1reply"
+
+
 def test_decoder_emits_script_plane_metadata() -> None:
     config = EncodingConfig.enigmatic_default()
     decoder = EnigmaticDecoder(config)

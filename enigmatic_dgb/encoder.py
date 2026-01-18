@@ -21,6 +21,8 @@ from .model import (
 
 logger = logging.getLogger(__name__)
 
+OP_RETURN_MAX_BYTES = 80
+
 
 @dataclass
 class SpendInstruction:
@@ -67,6 +69,7 @@ class EnigmaticEncoder:
         message: EnigmaticMessage,
         *,
         encrypt_with_passphrase: str | None = None,
+        op_return_metadata: dict[str, Any] | None = None,
     ) -> tuple[list[SpendInstruction], float]:
         """Convert a high-level message into spend instructions.
 
@@ -113,7 +116,9 @@ class EnigmaticEncoder:
                 )
             )
 
-        op_return_hint = self._build_op_return_hint(message, payload_for_encoding)
+        op_return_hint = self._build_op_return_hint(
+            message, payload_for_encoding, op_return_metadata=op_return_metadata
+        )
         if op_return_hint:
             instructions.append(
                 SpendInstruction(
@@ -139,6 +144,8 @@ class EnigmaticEncoder:
         channel: str,
         extra_payload: dict[str, Any] | None = None,
         encrypt_with_passphrase: str | None = None,
+        message_id: str | None = None,
+        op_return_metadata: dict[str, Any] | None = None,
     ) -> tuple[EnigmaticMessage, list[SpendInstruction], float]:
         """Encode a :class:`DialectSymbol` into spend instructions.
 
@@ -161,7 +168,7 @@ class EnigmaticEncoder:
         payload_for_hint = dict(payload)
 
         message = EnigmaticMessage(
-            id=str(uuid4()),
+            id=message_id or str(uuid4()),
             timestamp=datetime.now(timezone.utc),
             channel=channel,
             intent=symbol.intent or "symbol",
@@ -197,7 +204,9 @@ class EnigmaticEncoder:
                 )
             )
 
-        op_return_hint = self._build_op_return_hint(message, payload_for_hint)
+        op_return_hint = self._build_op_return_hint(
+            message, payload_for_hint, op_return_metadata=op_return_metadata
+        )
         if op_return_hint:
             instructions.append(
                 SpendInstruction(
@@ -248,15 +257,19 @@ class EnigmaticEncoder:
         return micros
 
     def _build_op_return_hint(
-        self, message: EnigmaticMessage, payload: dict[str, Any]
+        self,
+        message: EnigmaticMessage,
+        payload: dict[str, Any],
+        op_return_metadata: dict[str, Any] | None = None,
     ) -> bytes | None:
         """Serialize a compact hint for the optional OP_RETURN plane."""
 
         hint: dict[str, Any] = {
             "id": message.id,
             "intent": message.intent,
-            "channel": message.channel,
         }
+        metadata = dict(op_return_metadata or {})
+        channel = metadata.pop("channel", message.channel)
         if payload:
             try:
                 serialized_payload = json.dumps(
@@ -266,18 +279,40 @@ class EnigmaticEncoder:
                 serialized_payload = b""
             if serialized_payload:
                 digest = hashlib.sha256(serialized_payload).hexdigest()[:16]
-                hint["payload_hash"] = digest
+                metadata.setdefault("payload_hash", digest)
 
-        for keys_to_drop in (
-            set(),
-            {"channel"},
-            {"payload_hash"},
-            {"channel", "payload_hash"},
-        ):
-            candidate = {k: v for k, v in hint.items() if k not in keys_to_drop}
-            encoded = json.dumps(
-                candidate, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
-            if len(encoded) <= 80:
-                return encoded
+        candidates: list[tuple[str, Any]] = []
+        if channel:
+            candidates.append(("channel", channel))
+        for key in ("reply_to", "correlation_id", "sequence", "total", "payload_hash"):
+            if key in metadata:
+                candidates.append((key, metadata.pop(key)))
+        for key in sorted(metadata):
+            candidates.append((key, metadata[key]))
+
+        encoded = _encode_op_return_hint(hint)
+        if not encoded or len(encoded) > OP_RETURN_MAX_BYTES:
+            return None
+
+        for key, value in candidates:
+            if value is None:
+                continue
+            candidate = dict(hint)
+            candidate[key] = value
+            encoded_candidate = _encode_op_return_hint(candidate)
+            if not encoded_candidate:
+                continue
+            if len(encoded_candidate) <= OP_RETURN_MAX_BYTES:
+                hint = candidate
+                encoded = encoded_candidate
+
+        return encoded if encoded and len(encoded) <= OP_RETURN_MAX_BYTES else None
+
+
+def _encode_op_return_hint(candidate: dict[str, Any]) -> bytes | None:
+    try:
+        return json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    except (TypeError, ValueError):
         return None

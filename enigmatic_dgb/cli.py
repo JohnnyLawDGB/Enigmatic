@@ -565,6 +565,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object describing optional payload flags",
     )
     send_parser.add_argument(
+        "--message-id",
+        default=None,
+        help="Optional message id override (defaults to a random UUID)",
+    )
+    send_parser.add_argument(
+        "--op-return-json",
+        default=None,
+        help="JSON object describing additional OP_RETURN metadata",
+    )
+    send_parser.add_argument(
         "--fee",
         default=None,
         help="Override the per-transaction fee punctuation (default: config value)",
@@ -722,6 +732,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--extra-payload-json",
         default="{}",
         help="Optional JSON payload merged into the symbol metadata",
+    )
+    symbol_parser.add_argument(
+        "--message-id",
+        default=None,
+        help="Optional message id override (defaults to a random UUID)",
+    )
+    symbol_parser.add_argument(
+        "--op-return-json",
+        default=None,
+        help="JSON object describing additional OP_RETURN metadata",
     )
     symbol_parser.add_argument(
         "--encrypt-with-passphrase",
@@ -1790,8 +1810,22 @@ def cmd_binary_decode(args: argparse.Namespace) -> None:
 
 def cmd_send_message(args: argparse.Namespace) -> None:
     payload = _parse_payload_json(args.payload_json)
+    op_return_metadata = (
+        _parse_payload_json(args.op_return_json) if args.op_return_json else {}
+    )
+    message_id = args.message_id
+    if not message_id:
+        message_id = (
+            op_return_metadata.pop("id", None)
+            or op_return_metadata.pop("message_id", None)
+        )
+    else:
+        op_return_metadata.pop("id", None)
+        op_return_metadata.pop("message_id", None)
+    if not message_id:
+        message_id = str(uuid4())
     message = EnigmaticMessage(
-        id=str(uuid4()),
+        id=message_id,
         timestamp=datetime.now(timezone.utc),
         channel=args.channel,
         intent=args.intent,
@@ -1810,7 +1844,9 @@ def cmd_send_message(args: argparse.Namespace) -> None:
         )
     encoder = EnigmaticEncoder(config, target_address=args.to_address)
     instructions, fee = encoder.encode_message(
-        message, encrypt_with_passphrase=args.encrypt_with_passphrase
+        message,
+        encrypt_with_passphrase=args.encrypt_with_passphrase,
+        op_return_metadata=op_return_metadata,
     )
 
     if not instructions:
@@ -1829,6 +1865,8 @@ def cmd_send_message(args: argparse.Namespace) -> None:
             "fee": f"{fee:.8f}",
             "chunks": plans,
         }
+        if op_return_metadata:
+            summary["op_return_metadata"] = op_return_metadata
         print(json.dumps(summary, indent=2))
         return
 
@@ -1881,6 +1919,18 @@ def cmd_watch(args: argparse.Namespace) -> None:
 
 def cmd_send_symbol(args: argparse.Namespace) -> None:
     extra_payload = _parse_payload_json(args.extra_payload_json)
+    op_return_metadata = (
+        _parse_payload_json(args.op_return_json) if args.op_return_json else {}
+    )
+    message_id = args.message_id
+    if not message_id:
+        message_id = (
+            op_return_metadata.pop("id", None)
+            or op_return_metadata.pop("message_id", None)
+        )
+    else:
+        op_return_metadata.pop("id", None)
+        op_return_metadata.pop("message_id", None)
     dialect = load_dialect(args.dialect_path)
     rpc = _rpc_client()
     session: SessionContext | None = None
@@ -1917,6 +1967,8 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
             encrypt_with_passphrase=args.encrypt_with_passphrase,
             session=session,
             fee_override=fee_override,
+            message_id=message_id,
+            op_return_metadata=op_return_metadata,
         )
     except SessionRequiredError as exc:
         raise CLIError(str(exc)) from exc
@@ -1930,13 +1982,21 @@ def cmd_send_symbol(args: argparse.Namespace) -> None:
             "fee": f"{fee:.8f}",
             "outputs": outputs,
             "op_returns": op_returns_hex,
+            "message_id": message.id,
         }
+        if op_return_metadata:
+            summary["op_return_metadata"] = op_return_metadata
         print(json.dumps(summary, indent=2))
         return
 
     builder = TransactionBuilder(rpc)
     txid = builder.send_payment_tx(outputs, fee, op_return_data=op_returns_hex)
-    print(json.dumps({"txids": [txid]}, separators=COMPACT_JSON_SEPARATORS))
+    print(
+        json.dumps(
+            {"txids": [txid], "message_id": message.id},
+            separators=COMPACT_JSON_SEPARATORS,
+        )
+    )
 
 
 def cmd_list_utxos(args: argparse.Namespace) -> None:

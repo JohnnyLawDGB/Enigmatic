@@ -44,6 +44,8 @@ def encoder_stub(monkeypatch):
             channel,
             extra_payload=None,
             encrypt_with_passphrase=None,
+            message_id=None,
+            op_return_metadata=None,
         ):
             DummyEncoder.last_passphrase = encrypt_with_passphrase
             message = EnigmaticMessage(
