@@ -35,6 +35,8 @@ Environment options:
 - `ENIGMATIC_API_HOST`, `ENIGMATIC_API_PORT`
 - `ENIGMATIC_API_ALLOW_ORIGIN` (CORS; leave empty for none)
 
+For a systemd unit example, see `docs/VPS_SERVICE.md`.
+
 ### Endpoints
 
 `POST /encode/dtsp`

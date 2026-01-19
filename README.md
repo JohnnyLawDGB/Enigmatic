@@ -288,6 +288,7 @@ pytest --cov=enigmatic_dgb
 
 See [`docs/TOOLING.md`](docs/TOOLING.md) for complete command documentation.
 For VPS integration (CLI or HTTP wrapper), see [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
+Systemd example: [`docs/VPS_SERVICE.md`](docs/VPS_SERVICE.md).
 
 </details>
 
