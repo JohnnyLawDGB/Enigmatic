@@ -292,6 +292,22 @@ Systemd example: [`docs/VPS_SERVICE.md`](docs/VPS_SERVICE.md).
 
 </details>
 
+<details>
+<summary><b>Docker Quick Start</b></summary>
+
+```bash
+docker build -t enigmatic-api .
+docker run --rm -p 8123:8123 \
+  -e DGB_RPC_USER=rpcuser \
+  -e DGB_RPC_PASSWORD=rpcpass \
+  -e DGB_RPC_HOST=127.0.0.1 \
+  -e DGB_RPC_PORT=14022 \
+  -e DGB_RPC_WALLET=JohnnyTest \
+  enigmatic-api
+```
+
+</details>
+
 ---
 
 ## 📜 History & Inspiration
