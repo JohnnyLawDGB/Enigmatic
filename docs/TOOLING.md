@@ -66,7 +66,7 @@ transaction builder can sign each frame.
 | `plan-symbol` | Dry-run or broadcast a single symbol using automation metadata. |
 | `plan-chain` | Plan or broadcast multi-frame symbols defined in a dialect. |
 | `plan-pattern` | Plan/broadcast an explicit list of amounts (value-plane only). |
-| `send-sequence` / `plan-sequence` | Chained explicit sequences with optional OP_RETURN hints. |
+| `send-sequence` / `plan-sequence` | Explicit sequences (independent UTXOs by default; `--chained` to reuse change). |
 | `watch` | Observe an address and stream decoded packets. |
 | `unspendable` | Generate a human-readable unspendable vanity address. |
 | `ord-scan` | Scan a block range for OP_RETURN and Taproot-style inscription candidates (experimental). |
@@ -86,6 +86,9 @@ Common planner flags:
 - `--wait-between-txs` – poll cadence / pacing delay between frames.
 - `--max-wait-seconds` – abort threshold for confirmation waits.
 - `--fee` – override dialect fee punctuation (where supported).
+- `--chained` – reuse change output between steps instead of independent funding.
+- `--auto-prepare-utxos` – carve UTXOs automatically when independent funding is requested.
+- `--auto-prepare-fee` – fee for the auto-prepare transaction (defaults to `--fee`).
 - `--block-target` – optional absolute block height to celebrate or align with;
   broadcasting waits until the chain is within the configured drift window.
 
@@ -132,11 +135,18 @@ enigmatic-dgb plan-sequence \
   --amounts 73,61,47,37,23,13,5 \
   --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
 
-# Broadcast the same plan
+# Broadcast the same plan using independent UTXOs
 enigmatic-dgb send-sequence \
   --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
   --amounts 73,61,47,37,23,13,5 \
   --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U
+
+# Optional: auto-carve UTXOs if the wallet has only one large input
+enigmatic-dgb send-sequence \
+  --to-address DT98bqbNMfMY4hJFjR6EMADQuqnQCNV1NW \
+  --amounts 73,61,47,37,23,13,5 \
+  --fee 0.21 --op-return-ascii I,S,E,E,Y,O,U \
+  --auto-prepare-utxos
 
 ```
 
@@ -218,6 +228,8 @@ enigmatic-dgb ord-decode <txid> --json
 
 Pass `--no-include-op-return` or `--no-include-taproot-like` to narrow
 searches. Add `--json` to emit machine-readable results when scripting.
+If a wallet-scoped RPC cannot see a mempool transaction, `ord-decode` retries
+with the base RPC endpoint automatically.
 Taproot-aware parsing is experimental and may not recognize all inscription
 formats.
 

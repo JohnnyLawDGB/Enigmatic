@@ -258,7 +258,7 @@ pytest --cov=enigmatic_dgb
 
 **Planning & Sending:**
 - `plan-symbol` / `send-symbol` - Dialect-driven symbols
-- `plan-sequence` / `send-sequence` - Explicit sequences
+- `plan-sequence` / `send-sequence` - Explicit sequences (independent UTXOs by default; use `--chained`)
 - `plan-pattern` - Custom value/fee patterns
 - `plan-chain` - Multi-frame dialect chains
 - `send-message` - Free-form intents
