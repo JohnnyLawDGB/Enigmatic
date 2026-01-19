@@ -872,9 +872,22 @@ def plan_independent_pattern(
 
     available_utxos = list(utxos)
     steps: list[PatternPlan] = []
-    for amount in normalized_amounts:
+    for index, amount in enumerate(normalized_amounts, start=1):
+        if not available_utxos:
+            raise PlanningError(
+                "Independent sequences require enough distinct UTXOs to fund each step. "
+                "Run prepare-utxos or enable --chained."
+            )
         required_total = amount + fee
-        selected, total = _select_utxos_covering_total(available_utxos, required_total)
+        try:
+            selected, total = _select_utxos_covering_total(
+                available_utxos, required_total
+            )
+        except PlanningError as exc:
+            raise PlanningError(
+                f"Independent sequences could not fund step {index} of {len(normalized_amounts)}; "
+                "run prepare-utxos, add funding, or enable --chained."
+            ) from exc
         for entry in selected:
             available_utxos.remove(entry)
         step_inputs = [

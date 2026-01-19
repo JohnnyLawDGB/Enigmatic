@@ -19,11 +19,12 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 from uuid import uuid4
 
 import yaml
@@ -47,6 +48,7 @@ from .dtsp import (
 from .model import EncodingConfig, EnigmaticMessage
 from .planner import (
     AutomationDialect,
+    DUST_LIMIT,
     PatternPlan,
     PatternPlanSequence,
     PlanningError,
@@ -107,6 +109,8 @@ logger = logging.getLogger(__name__)
 COMPACT_JSON_SEPARATORS = (",", ":")
 MAX_OUTPUTS_PER_TX = 50
 TAPROOT_WIZARD_DEFAULT_WALLET = "taproot-lab"
+EIGHT_DP = Decimal("0.00000001")
+AUTO_PREP_BUFFER = Decimal("0.0002")
 
 RESERVED_PLANE_MARKERS = (
     # Table 2.8 reserved combinations for value, fee, cardinality, and cadence.
@@ -875,6 +879,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use a chained change output instead of independent funding",
     )
+    pattern_parser.add_argument(
+        "--auto-prepare-utxos",
+        action="store_true",
+        help="Automatically carve UTXOs if independent funding is requested",
+    )
+    pattern_parser.add_argument(
+        "--auto-prepare-fee",
+        help="Fee in DGB for the auto-prepare transaction (defaults to --fee)",
+    )
 
     list_utxos_parser = subparsers.add_parser(
         "list-utxos",
@@ -1512,6 +1525,15 @@ def _configure_sequence_parser(
         action="store_true",
         help="Use chained change outputs instead of independent funding",
     )
+    parser.add_argument(
+        "--auto-prepare-utxos",
+        action="store_true",
+        help="Automatically carve UTXOs if independent funding is requested",
+    )
+    parser.add_argument(
+        "--auto-prepare-fee",
+        help="Fee in DGB for the auto-prepare transaction (defaults to --fee)",
+    )
     if include_mode_flags:
         parser.add_argument(
             "--dry-run",
@@ -1596,6 +1618,138 @@ def _load_selected_utxos(
         missing_desc = ", ".join(f"{txid}:{vout}" for txid, vout in missing)
         raise CLIError("Requested UTXOs not found or not spendable: " + missing_desc)
     return [indexed[ref] for ref in references]
+
+
+def _wait_for_tx_confirmations(
+    rpc: DigiByteRPC,
+    txid: str,
+    min_confirmations: int,
+    max_wait_seconds: float | None,
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
+    target_confirmations = max(1, min_confirmations)
+    waited = 0.0
+    poll_interval = 5.0
+    while True:
+        try:
+            info = rpc.gettransaction(txid)
+        except RPCError:
+            info = {}
+        confirmations = int(info.get("confirmations", 0) or 0)
+        if confirmations >= target_confirmations:
+            if progress_callback is not None:
+                progress_callback(
+                    f"Preparation tx reached {confirmations} confirmations"
+                )
+            return
+        if progress_callback is not None:
+            progress_callback(
+                f"Waiting for preparation tx confirmations ({confirmations}/{target_confirmations})"
+            )
+        if max_wait_seconds is not None and waited >= max_wait_seconds:
+            raise CLIError(
+                "Preparation transaction did not confirm within the allotted time"
+            )
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+
+def _auto_prepare_utxos(
+    rpc: DigiByteRPC,
+    builder: TransactionBuilder,
+    amounts: list[Decimal],
+    fee: Decimal,
+    min_confirmations: int,
+    prepare_fee: Decimal,
+    max_wait_seconds: float | None,
+    progress_callback: Callable[[str], None] | None,
+) -> list[dict[str, Any]]:
+    buffer_amount = max(DUST_LIMIT, AUTO_PREP_BUFFER)
+    funding_confirmations = max(1, min_confirmations)
+    targets: list[Decimal] = []
+    for amount in amounts:
+        target = (amount + fee + buffer_amount).quantize(EIGHT_DP)
+        if target <= 0:
+            raise CLIError("Auto-prepared UTXO target amount must be positive")
+        targets.append(target)
+
+    outputs_payload: list[dict[str, Any]] = []
+    addresses: list[str] = []
+    for target in targets:
+        address = rpc.getnewaddress()
+        outputs_payload.append({address: float(target)})
+        addresses.append(address)
+
+    signed_hex = builder.build_custom_tx(
+        outputs_payload, float(prepare_fee), min_confirmations=funding_confirmations
+    )
+    txid = rpc.sendrawtransaction(signed_hex)
+    if progress_callback is not None:
+        progress_callback(f"Prepared {len(targets)} UTXOs in {txid}")
+    _wait_for_tx_confirmations(
+        rpc, txid, funding_confirmations, max_wait_seconds, progress_callback
+    )
+
+    prepared_utxos = rpc.listunspent(funding_confirmations, 9999999, addresses)
+    if len(prepared_utxos) < len(addresses):
+        raise CLIError(
+            "Auto-prepared UTXOs were not detected after confirmation; rerun with --list-utxos or supply --use-utxos."
+        )
+    return prepared_utxos
+
+
+def _ensure_independent_funding(
+    rpc: DigiByteRPC,
+    builder: TransactionBuilder,
+    amounts: list[Decimal],
+    fee: Decimal,
+    min_confirmations: int,
+    selected_utxos: list[dict[str, Any]],
+    *,
+    auto_prepare: bool,
+    auto_prepare_fee: str | None,
+    allow_unconfirmed: bool,
+    is_dry_run: bool,
+    max_wait_seconds: float | None,
+    progress_callback: Callable[[str], None] | None,
+) -> list[dict[str, Any]]:
+    required = len(amounts)
+    if required <= 1:
+        return selected_utxos
+    if selected_utxos:
+        if len(selected_utxos) < required:
+            raise CLIError(
+                "Independent sequences require one UTXO per step. "
+                "Provide more --use-utxos entries, remove --use-utxos, or use --chained."
+            )
+        return selected_utxos
+
+    count_minconf = min_confirmations if allow_unconfirmed else max(1, min_confirmations)
+    available = rpc.listunspent(count_minconf)
+    if len(available) >= required:
+        return selected_utxos
+
+    if is_dry_run or not auto_prepare:
+        raise CLIError(
+            "Independent sequences require enough confirmed UTXOs for every step. "
+            "Run prepare-utxos, add funding, or pass --auto-prepare-utxos."
+        )
+
+    prepare_fee = (
+        _parse_decimal(auto_prepare_fee, "--auto-prepare-fee")
+        if auto_prepare_fee
+        else fee
+    )
+    return _auto_prepare_utxos(
+        rpc,
+        builder,
+        amounts,
+        fee,
+        min_confirmations,
+        prepare_fee,
+        max_wait_seconds,
+        progress_callback,
+    )
 
 
 def _parse_max_frames(value: int | None) -> int | None:
@@ -2290,7 +2444,15 @@ def cmd_ord_decode(args: argparse.Namespace) -> None:
     rpc = _rpc_client()
     decoder = OrdinalInscriptionDecoder(rpc)
     logger.debug("ord-decode tx=%s vout=%s", args.txid, args.vout)
-    payloads = decoder.decode_from_tx(args.txid)
+    try:
+        payloads = decoder.decode_from_tx(args.txid)
+    except RPCError as exc:
+        if exc.code == -5 and rpc.config.wallet:
+            base_rpc = _rpc_client({"wallet": ""})
+            decoder = OrdinalInscriptionDecoder(base_rpc)
+            payloads = decoder.decode_from_tx(args.txid)
+        else:
+            raise CLIError(f"ord-decode failed: {exc}") from exc
     if args.vout is not None:
         payloads = [
             payload
@@ -2821,6 +2983,22 @@ def cmd_plan_pattern(args: argparse.Namespace) -> None:
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
+    builder = TransactionBuilder(rpc)
+    if args.broadcast and not args.chained:
+        selected_utxos = _ensure_independent_funding(
+            rpc,
+            builder,
+            amounts,
+            fee,
+            args.min_confirmations,
+            selected_utxos,
+            auto_prepare=args.auto_prepare_utxos,
+            auto_prepare_fee=args.auto_prepare_fee,
+            allow_unconfirmed=args.allow_unconfirmed_chain,
+            is_dry_run=not args.broadcast,
+            max_wait_seconds=args.max_wait_seconds,
+            progress_callback=_stdout_progress,
+        )
     planner_fn = plan_explicit_pattern if args.chained else plan_independent_pattern
     plan = planner_fn(
         rpc,
@@ -2925,10 +3103,27 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
     op_returns = _parse_op_return_args(
         args.op_return_hex, args.op_return_ascii, len(amounts)
     )
+    is_dry_run = getattr(args, "dry_run", False) or args.command == "plan-sequence"
     rpc = _rpc_client()
     selected_utxos = _load_selected_utxos(
         rpc, getattr(args, "use_utxos", None), args.min_confirmations
     )
+    builder = TransactionBuilder(rpc)
+    if not args.chained and not args.single_tx:
+        selected_utxos = _ensure_independent_funding(
+            rpc,
+            builder,
+            amounts,
+            fee,
+            args.min_confirmations,
+            selected_utxos,
+            auto_prepare=args.auto_prepare_utxos,
+            auto_prepare_fee=args.auto_prepare_fee,
+            allow_unconfirmed=args.allow_unconfirmed_chain,
+            is_dry_run=is_dry_run,
+            max_wait_seconds=args.max_wait_seconds,
+            progress_callback=_stdout_progress,
+        )
     planner_fn = plan_explicit_pattern if args.chained else plan_independent_pattern
     plan = planner_fn(
         rpc,
@@ -2939,12 +3134,10 @@ def cmd_send_sequence(args: argparse.Namespace) -> None:
         preferred_utxos=selected_utxos or None,
         allow_unconfirmed_chain=args.allow_unconfirmed_chain or args.single_tx,
     )
-    is_dry_run = getattr(args, "dry_run", False) or args.command == "plan-sequence"
     if is_dry_run:
         _print_sequence_summary(plan, op_returns)
         print(json.dumps(plan.to_jsonable(), indent=2))
         return
-    builder = TransactionBuilder(rpc)
     txids = broadcast_pattern_plan(
         rpc,
         plan,

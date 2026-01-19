@@ -65,6 +65,9 @@ class DummyRPC:
         self.sent_txids.append(txid)
         return txid
 
+    def getmempoolentry(self, txid: str) -> dict[str, object]:
+        return {"txid": txid}
+
 
 class AdvancingRPC(DummyRPC):
     def __init__(self, start_height: int = 95) -> None:
@@ -279,6 +282,21 @@ def test_plan_independent_pattern_uses_distinct_inputs() -> None:
     )
     assert len(plan.steps) == 2
     assert plan.steps[0].inputs[0].txid != plan.steps[1].inputs[0].txid
+
+
+def test_plan_independent_pattern_requires_multiple_utxos() -> None:
+    class SingleUTXORPC(DummyRPC):
+        def listunspent(self, minconf: int) -> list[dict[str, object]]:  # type: ignore[override]
+            return [{"txid": "solo", "vout": 0, "amount": "4.0", "spendable": True}]
+
+    rpc = SingleUTXORPC()
+    with pytest.raises(PlanningError):
+        plan_independent_pattern(
+            rpc,
+            to_address="dgb1target",
+            amounts=[Decimal("1.0"), Decimal("1.0")],
+            fee=Decimal("0.1"),
+        )
 
 
 def test_broadcast_pattern_plan_uses_same_stack() -> None:
