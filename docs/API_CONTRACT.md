@@ -1,0 +1,69 @@
+# Encode/Decode API Contract
+
+Enigmatic can be called in two ways on a VPS: direct CLI execution or a minimal
+HTTP JSON wrapper. Both options use the same encoding/decoding logic.
+
+## Option A: CLI (subprocess)
+
+Call `enigmatic-dgb` with arguments and parse stdout. This is the simplest
+option if you already manage processes on the VPS.
+
+Example (DTSP encode):
+
+```bash
+enigmatic-dgb dtsp-encode "HELLO"
+```
+
+Example (Taproot decode):
+
+```bash
+enigmatic-dgb ord-decode <txid> --json
+```
+
+All CLI commands exit non-zero on error and print `error: ...` to stderr.
+
+## Option B: HTTP JSON API
+
+Run the server:
+
+```bash
+enigmatic-api --host 0.0.0.0 --port 8123
+```
+
+Environment options:
+
+- `ENIGMATIC_API_HOST`, `ENIGMATIC_API_PORT`
+- `ENIGMATIC_API_ALLOW_ORIGIN` (CORS; leave empty for none)
+
+### Endpoints
+
+`POST /encode/dtsp`
+- Request: `{ "message": "HELLO", "include_handshake": true, "include_accept": false }`
+- Response: `{ "amounts": ["0.00022611", "..."], "sequence": "0.00022611,..." }`
+
+`POST /decode/dtsp`
+- Request: `{ "amounts": ["0.00022611", "..."], "strip_handshake": false, "tolerance": 1e-10, "show_matches": true }`
+- Response: `{ "message": "HELLO", "matches": [{"amount":"0.00022611","symbol":"START","error":0.0}] }`
+
+`POST /encode/binary`
+- Request: `{ "text": "HI", "base_amount": "0.0001", "bits_per_char": 8 }`
+- Response: `{ "amounts": ["0.00011001", "..."], "packets": [{"letter":"H","bits":"01001000","amount":"0.00011001"}] }`
+
+`POST /decode/binary`
+- Request: `{ "amounts": ["0.00011001", "..."], "base_amount": "0.0001", "bits_per_char": 8 }`
+- Response: `{ "text": "HI" }`
+
+`POST /decode/ord`
+- Request: `{ "txid": "<txid>", "vout": 0 }`
+- Response: `{ "payloads": [{ "txid":"...", "vout":0, "protocol":"enigmatic/taproot-v1", "decoded_json": {...} }] }`
+
+### Errors
+
+All errors return JSON with `{"error": "<message>"}` and a non-200 status. For
+`ord-decode`, the server retries with the base RPC endpoint if a wallet-scoped
+RPC cannot see a mempool transaction.
+
+### Security
+
+Do not expose the HTTP API directly to the public internet. Run it behind a
+private network, VPN, or authenticated reverse proxy.

@@ -286,6 +286,7 @@ pytest --cov=enigmatic_dgb
 - `dialect` - Manage dialect files
 
 See [`docs/TOOLING.md`](docs/TOOLING.md) for complete command documentation.
+For VPS integration (CLI or HTTP wrapper), see [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
 
 </details>
 

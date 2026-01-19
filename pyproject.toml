@@ -29,6 +29,7 @@ dev = [
 
 [project.scripts]
 enigmatic-dgb = "enigmatic_dgb.cli:main"
+enigmatic-api = "enigmatic_dgb.http_api:main"
 
 [tool.setuptools]
 
