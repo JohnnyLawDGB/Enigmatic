@@ -284,6 +284,7 @@ pytest --cov=enigmatic_dgb
 - `prepare-utxos` - Pre-fragment for later use
 - `watch` - Observe address activity
 - `dialect` - Manage dialect files
+- `enigmatic-api` - Minimal HTTP JSON wrapper for encode/decode
 
 See [`docs/TOOLING.md`](docs/TOOLING.md) for complete command documentation.
 For VPS integration (CLI or HTTP wrapper), see [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).

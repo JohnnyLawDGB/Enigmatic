@@ -57,11 +57,45 @@ Environment options:
 - Request: `{ "txid": "<txid>", "vout": 0 }`
 - Response: `{ "payloads": [{ "txid":"...", "vout":0, "protocol":"enigmatic/taproot-v1", "decoded_json": {...} }] }`
 
+`POST /plan/sequence`
+- Request: `{ "to_address": "dgb1...", "amounts": ["0.1","0.2"], "fee": "0.21", "chained": false, "min_confirmations": 1, "use_utxos": ["txid:vout"] }`
+- Response: `{ "plan": { ... }, "op_returns": [null,null] }`
+
+`POST /send/sequence`
+- Request: `{ "to_address": "dgb1...", "amounts": ["0.1","0.2"], "fee": "0.21", "chained": false, "min_confirmations": 1, "auto_prepare_utxos": true }`
+- Response: `{ "txids": ["..."] }`
+
+`POST /plan/pattern` and `POST /send/pattern`
+- Same shape as the sequence endpoints; `op_return_*` is ignored for patterns.
+
+Optional send parameters:
+- `allow_unconfirmed` (bool)
+- `single_tx` (bool)
+- `min_confirmations_between_steps` (int)
+- `wait_between_txs` (seconds)
+- `max_wait_seconds` (seconds)
+- `op_return_hex` or `op_return_ascii` (array of strings, length = amounts)
+- `auto_prepare_fee` (DGB string)
+
 ### Errors
 
 All errors return JSON with `{"error": "<message>"}` and a non-200 status. For
 `ord-decode`, the server retries with the base RPC endpoint if a wallet-scoped
 RPC cannot see a mempool transaction.
+
+### Request RPC overrides
+
+Every endpoint accepts an optional `rpc` object to override the default RPC
+settings (useful when the VPS hosts multiple wallets):
+
+```json
+{
+  "rpc": {
+    "wallet": "JohnnyTest",
+    "endpoint": "http://127.0.0.1:14022"
+  }
+}
+```
 
 ### Security
 

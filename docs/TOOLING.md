@@ -77,6 +77,7 @@ transaction builder can sign each frame.
 | `ord-plan-taproot` | Draft an Enigmatic Taproot Dialect v1 inscription leaf and funding sketch (experimental). |
 | `ord-inscribe` | Build, sign, and optionally broadcast an inscription transaction (experimental, irreversible). |
 | `dtsp-*`, `binary-utxo-*` | Encode/decode helpers for specific substitution mappings. |
+| `enigmatic-api` | Start the minimal HTTP JSON wrapper for encode/decode endpoints. |
 
 Common planner flags:
 
