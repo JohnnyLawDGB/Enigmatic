@@ -449,5 +449,8 @@ class TransactionBuilder:
             fee_rate_val = float(options["feeRate"])
             if fee_rate_val > 1.0:
                 options["feeRate"] = sat_vb_to_dgb_per_kvb(fee_rate_val)
+        for key in ("feeRate", "fee_rate"):
+            if key in options:
+                options[key] = self._normalize_output_amount(key, options[key])
 
         return options

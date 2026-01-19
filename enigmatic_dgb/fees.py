@@ -6,6 +6,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from typing import Any, Dict, Iterable, Tuple
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,10 @@ def dgb_per_kvb_to_sat_vb(rate: float | int) -> float:
 def sat_vb_to_dgb_per_kvb(rate: float | int) -> float:
     """Convert a sat/vB fee rate to DGB/kvB."""
 
-    return float(rate) / 1e5
+    quantized = (Decimal(str(rate)) / Decimal("100000")).quantize(
+        Decimal("0.00000001"), rounding=ROUND_DOWN
+    )
+    return float(quantized)
 
 
 def calculate_fee_sats(fee_rate_sat_vb: float, vsize: int) -> int:
