@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  enigmatic-api:
+    build: .
+    container_name: enigmatic-api
+    restart: unless-stopped
+    environment:
+      ENIGMATIC_API_HOST: 0.0.0.0
+      ENIGMATIC_API_PORT: "8123"
+      DGB_RPC_USER: "${DGB_RPC_USER}"
+      DGB_RPC_PASSWORD: "${DGB_RPC_PASSWORD}"
+      DGB_RPC_HOST: "${DGB_RPC_HOST:-127.0.0.1}"
+      DGB_RPC_PORT: "${DGB_RPC_PORT:-14022}"
+      DGB_RPC_WALLET: "${DGB_RPC_WALLET:-JohnnyTest}"
+    ports:
+      - "127.0.0.1:8123:8123"
+    # If DigiByte RPC runs on the host, you can add this instead of DGB_RPC_HOST:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    # and set DGB_RPC_HOST=host.docker.internal in your env file.

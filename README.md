@@ -308,6 +308,18 @@ docker run --rm -p 8123:8123 \
 
 </details>
 
+<details>
+<summary><b>Docker Compose</b></summary>
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+```
+
+See `docker-compose.yml` and `docs/DOCKER_COMPOSE.md` for host/RPC notes.
+
+</details>
+
 ---
 
 ## 📜 History & Inspiration
