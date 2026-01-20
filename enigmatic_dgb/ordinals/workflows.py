@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -33,6 +34,7 @@ from ..fees import (
     sat_vb_to_dgb_per_kvb,
     select_fee_rate,
 )
+from ..planner import DUST_LIMIT
 from ..rpc_client import RPCError, format_rpc_hint
 from ..tx_builder import TransactionBuilder
 
@@ -112,6 +114,7 @@ def prepare_inscription_transaction(
     content_type: str,
     *,
     scheme: str = "taproot",
+    postage_dgb: float | Decimal | str = DUST_LIMIT,
     conf_target: int | None = None,
     estimate_mode: str | None = None,
     user_fee_rate_satvb: float | None = None,
@@ -133,6 +136,21 @@ def prepare_inscription_transaction(
         plan = planner.plan_op_return_inscription(payload, metadata=metadata)
         inscription_hex = payload.hex()
     else:
+        try:
+            postage = Decimal(str(postage_dgb))
+        except (InvalidOperation, TypeError) as exc:
+            raise InscriptionFlowError(
+                "Invalid postage amount for Taproot inscription"
+            ) from exc
+        if postage <= 0:
+            raise InscriptionFlowError(
+                "Taproot inscription postage must be a positive amount"
+            )
+        if postage < DUST_LIMIT:
+            raise InscriptionFlowError(
+                f"Taproot inscription postage must be at least {DUST_LIMIT} DGB"
+            )
+
         try:
             plan = planner.plan_taproot_inscription(payload, metadata=metadata)
         except ValueError as exc:
@@ -207,7 +225,7 @@ def prepare_inscription_transaction(
             inscription_address = create_taproot_address(output_key)
 
             # Send a small amount to this Taproot output (commits the inscription)
-            outputs_payload = [{inscription_address: 0.0001}]
+            outputs_payload = [{inscription_address: float(postage)}]
             raw_tx = builder.build_custom_tx(
                 outputs_payload,
                 float(guess_fee_dgb),

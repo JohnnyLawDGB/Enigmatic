@@ -1128,6 +1128,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="text/plain",
         help="Content type hint stored alongside the payload (default: text/plain)",
     )
+    ord_inscribe_parser.add_argument(
+        "--postage-dgb",
+        default=str(DUST_LIMIT),
+        help=(
+            "Amount to lock in the Taproot commitment output (default: %(default)s). "
+            "Increase this to fund higher-fee reveals."
+        ),
+    )
     ord_inscribe_broadcast = ord_inscribe_parser.add_mutually_exclusive_group()
     ord_inscribe_broadcast.add_argument(
         "--broadcast",
@@ -1254,6 +1262,14 @@ def build_parser() -> argparse.ArgumentParser:
     ord_wizard_parser.add_argument(
         "--content-type",
         help="Content-Type header to embed (default text/plain or application/json)",
+    )
+    ord_wizard_parser.add_argument(
+        "--postage-dgb",
+        default=str(DUST_LIMIT),
+        help=(
+            "Amount to lock in the Taproot commitment output (default: %(default)s). "
+            "Increase this to fund higher-fee reveals."
+        ),
     )
     ord_wizard_parser.add_argument(
         "--fee-rate-satvb",
@@ -2612,6 +2628,15 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
             "Your inscription payload is empty. Make sure you passed a non-empty string or file contents into the ord-inscribe command."
         )
     metadata = {"content_type": args.content_type}
+    postage = None
+    if args.scheme == "taproot":
+        postage = _parse_decimal(args.postage_dgb, "--postage-dgb")
+        if postage <= 0:
+            raise CLIError("--postage-dgb must be a positive amount")
+        if postage < DUST_LIMIT:
+            raise CLIError(
+                f"--postage-dgb must be at least {DUST_LIMIT} DGB to avoid dust outputs"
+            )
 
     logger.debug(
         "ord-inscribe scheme=%s content_type=%s broadcast=%s max_fee_sats=%s",
@@ -2721,7 +2746,7 @@ def cmd_ord_inscribe(args: argparse.Namespace) -> None:
             )
 
             # Send a small amount to this Taproot output (commits the inscription)
-            outputs_payload = [{inscription_address: 0.0001}]
+            outputs_payload = [{inscription_address: float(postage or DUST_LIMIT)}]
             raw_tx = builder.build_custom_tx(
                 outputs_payload,
                 float(guess_fee_dgb),
@@ -2888,6 +2913,14 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
             "Taproot single script element exceeds 520 bytes; shorten payload or use --scheme op-return."
         )
 
+    postage = _parse_decimal(args.postage_dgb, "--postage-dgb")
+    if postage <= 0:
+        raise CLIError("--postage-dgb must be a positive amount")
+    if postage < DUST_LIMIT:
+        raise CLIError(
+            f"--postage-dgb must be at least {DUST_LIMIT} DGB to avoid dust outputs"
+        )
+
     print(
         f"Envelope stats: payload={stats['payload_bytes']} bytes | envelope={stats['envelope_bytes']} | push={stats['push_bytes']}"
     )
@@ -2897,6 +2930,7 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
         payload_bytes,
         content_type,
         scheme="taproot",
+        postage_dgb=float(postage),
         user_fee_rate_satvb=args.fee_rate_satvb,
         min_fee_rate_satvb_floor=args.min_fee_rate_satvb_floor,
         max_fee_sats=None,
@@ -2915,6 +2949,7 @@ def cmd_ord_wizard(args: argparse.Namespace) -> None:
             payload_bytes,
             content_type,
             scheme="taproot",
+            postage_dgb=float(postage),
             user_fee_rate_satvb=args.fee_rate_satvb,
             min_fee_rate_satvb_floor=args.min_fee_rate_satvb_floor,
             max_fee_sats=recommended_cap,
