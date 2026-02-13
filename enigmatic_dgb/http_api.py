@@ -509,7 +509,15 @@ def _handle_send_sequence(payload: dict[str, Any]) -> dict[str, Any]:
     rpc = _make_rpc(payload=payload)
     use_utxos = payload.get("use_utxos")
     selected = _load_selected_utxos(rpc, use_utxos, min_confirmations)
-    builder = TransactionBuilder(rpc)
+
+    # Support pinned change address and RBF from caller
+    change_address = payload.get("change_address")
+    replaceable = payload.get("replaceable")
+    builder = TransactionBuilder(
+        rpc,
+        change_address=change_address if isinstance(change_address, str) else None,
+        default_replaceable=bool(replaceable) if replaceable is not None else None,
+    )
     if not chained and not single_tx:
         selected = _ensure_independent_funding(
             rpc,

@@ -87,9 +87,16 @@ class TransactionBuilder:
 
     DEFAULT_RELAY_SAFE_FEE_RATE = 0.0002
 
-    def __init__(self, rpc: DigiByteRPC) -> None:
+    def __init__(
+        self,
+        rpc: DigiByteRPC,
+        change_address: str | None = None,
+        default_replaceable: bool | None = None,
+    ) -> None:
         self.rpc = rpc
         self.utxo_manager = UTXOManager(rpc)
+        self.change_address = change_address
+        self.default_replaceable = default_replaceable
 
     def build_payment_tx(
         self,
@@ -158,8 +165,8 @@ class TransactionBuilder:
                     {"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos
                 ]
                 if change_amount > 1e-8:
-                    change_address = self.rpc.getnewaddress()
-                    outputs[change_address] = round(change_amount, 8)
+                    change_addr = self.change_address or self.rpc.getnewaddress()
+                    outputs[change_addr] = round(change_amount, 8)
 
                 manual_outputs = self._prepare_outputs_payload(outputs, op_return_data)
                 manual_outputs = self._format_outputs_for_rpc(manual_outputs)
@@ -303,40 +310,49 @@ class TransactionBuilder:
             extra=extra_log or None,
         )
 
-        total_output = sum(float(amount) for amount in amounts)
-        selected_utxos, change_amount = self.utxo_manager.select_utxos(
-            total_output, fee, min_confirmations=min_confirmations
-        )
-
-        tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
         aggregated_outputs: Dict[str, float] = {}
         for amount in amounts:
             aggregated_outputs[to_address] = round(
                 aggregated_outputs.get(to_address, 0.0) + float(amount), 8
             )
 
-        if change_amount > 1e-8:
-            change_address = self.rpc.getnewaddress()
-            aggregated_outputs[change_address] = round(change_amount, 8)
-
         outputs_payload = self._prepare_outputs_payload(
             aggregated_outputs, op_return_data
         )
         formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
 
-        raw_tx = self.rpc.createrawtransaction(tx_inputs, formatted_outputs)
-        signed = self.rpc.signrawtransactionwithwallet(raw_tx)
-        if not signed.get("complete"):
-            raise RuntimeError("Node failed to produce a complete signature set")
-        signed_hex = signed["hex"]
+        # Try fundrawtransaction first (proper fee calculation + pinned change)
+        signed_hex: str | None = None
+        try:
+            tmp_raw = self.rpc.createrawtransaction([], formatted_outputs)
+            options = self._build_fund_options(fee, replaceable=self.default_replaceable)
+            funded = self.rpc.fundrawtransaction(tmp_raw, options)
+            signed = self.rpc.signrawtransactionwithwallet(funded["hex"])
+            if not signed.get("complete"):
+                raise RuntimeError("Node failed to produce a complete signature set")
+            signed_hex = signed["hex"]
+        except RPCError as exc:
+            logger.info("fundrawtransaction unavailable for fan-out: %s", exc)
 
-        total_in = sum(u.amount for u in selected_utxos)
-        total_out = total_output + max(change_amount, 0)
-        actual_fee = total_in - total_out
-        if abs(actual_fee - fee) > 0.01:
-            logger.warning(
-                "Manual selection fee %.8f differs from requested %.8f", actual_fee, fee
+        # Fallback: manual UTXO selection
+        if signed_hex is None:
+            total_output = sum(float(amount) for amount in amounts)
+            selected_utxos, change_amount = self.utxo_manager.select_utxos(
+                total_output, fee, min_confirmations=min_confirmations
             )
+            tx_inputs = [{"txid": utxo.txid, "vout": utxo.vout} for utxo in selected_utxos]
+            if change_amount > 1e-8:
+                change_addr = self.change_address or self.rpc.getnewaddress()
+                aggregated_outputs[change_addr] = round(change_amount, 8)
+                outputs_payload = self._prepare_outputs_payload(
+                    aggregated_outputs, op_return_data
+                )
+                formatted_outputs = self._format_outputs_for_rpc(outputs_payload)
+            raw_tx = self.rpc.createrawtransaction(tx_inputs, formatted_outputs)
+            signed = self.rpc.signrawtransactionwithwallet(raw_tx)
+            if not signed.get("complete"):
+                raise RuntimeError("Node failed to produce a complete signature set")
+            signed_hex = signed["hex"]
 
         txid = self.rpc.sendrawtransaction(signed_hex)
         logger.info("Broadcasted transaction %s", txid)
@@ -442,6 +458,11 @@ class TransactionBuilder:
 
         if replaceable is not None:
             options.setdefault("replaceable", bool(replaceable))
+        elif self.default_replaceable is not None:
+            options.setdefault("replaceable", bool(self.default_replaceable))
+
+        if self.change_address and "changeAddress" not in options:
+            options["changeAddress"] = self.change_address
 
         # Backward compatibility: accept sats/vbyte overrides by converting to coin/kvB
         if isinstance(options.get("feeRate"), (int, float)):
