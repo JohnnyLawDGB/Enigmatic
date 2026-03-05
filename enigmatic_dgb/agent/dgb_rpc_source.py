@@ -68,6 +68,28 @@ class DigiByteWalletEventSource(EventSource):
         self._seen_ids: set[str] = set()
         self._address_set = set(self.addresses or [])
 
+    def _tx_touches_any_watched(self, txid: str) -> str | None:
+        """Return the first watched address found in ``txid`` outputs, or None.
+
+        Fallback for when ``listtransactions`` omits the ``address`` field
+        (common with segwit/bech32 outputs).
+        """
+        try:
+            decoded = self.rpc.call("getrawtransaction", [txid, 1])
+        except Exception:
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        for vout in decoded.get("vout", []) or []:
+            spk = vout.get("scriptPubKey") or {}
+            addr = spk.get("address")
+            if addr and addr in self._address_set:
+                return addr
+            for a in spk.get("addresses") or []:
+                if a in self._address_set:
+                    return a
+        return None
+
     def poll(self) -> List[AgentEvent]:
         entries = self.rpc.call(
             "listtransactions",
@@ -79,7 +101,16 @@ class DigiByteWalletEventSource(EventSource):
                 continue
             address = entry.get("address")
             if self._address_set and address not in self._address_set:
-                continue
+                # Address field present but not watched — skip.
+                if address is not None:
+                    continue
+                # Address field missing (segwit) — fall back to scriptPubKey.
+                txid = entry.get("txid")
+                resolved = self._tx_touches_any_watched(str(txid)) if txid else None
+                if not resolved:
+                    continue
+                # Patch the entry so downstream consumers see the address.
+                entry = {**entry, "address": resolved}
             if not entry.get("txid"):
                 continue
             event_id = _build_event_id(entry)

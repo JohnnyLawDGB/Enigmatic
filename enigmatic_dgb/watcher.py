@@ -90,21 +90,47 @@ class Watcher:
             new_txs.append(tx)
         return new_txs
 
+    def _tx_touches_address(self, txid: str, address: str) -> bool:
+        """Check if any output of ``txid`` pays to ``address`` via scriptPubKey.
+
+        This is the fallback path used when ``listtransactions`` does not
+        populate the ``address`` field (common for segwit/bech32 outputs).
+        """
+        decoded = self._get_decoded_transaction(txid)
+        if not decoded:
+            return False
+        for vout in decoded.get("vout", []) or []:
+            spk = vout.get("scriptPubKey") or {}
+            if spk.get("address") == address:
+                return True
+            for addr in spk.get("addresses") or []:
+                if addr == address:
+                    return True
+        return False
+
     def _fetch_address_transactions(self, address: str) -> List[ObservedTx]:
         """Fetch recent transactions for ``address``.
 
         DigiByte Core does not provide an out-of-the-box address index.  Integrators
         may want to provide a custom address indexer or cache in production.  This
         implementation uses ``listtransactions`` and filters results as a
-        placeholder.
+        placeholder.  When the ``address`` field is missing (segwit/bech32),
+        it falls back to inspecting scriptPubKey via ``getrawtransaction``.
         """
 
         params = ["*", 1000, 0, True]
         raw = self.rpc.call("listtransactions", params)
         observed: List[ObservedTx] = []
         for entry in raw:
-            if entry.get("address") != address:
-                continue
+            entry_addr = entry.get("address")
+            if entry_addr != address:
+                # Fast path matched a different address — skip.
+                if entry_addr is not None:
+                    continue
+                # Address field missing (segwit) — fall back to scriptPubKey.
+                txid = entry.get("txid")
+                if not txid or not self._tx_touches_address(str(txid), address):
+                    continue
             txid = entry.get("txid")
             if not txid:
                 continue
