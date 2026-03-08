@@ -5,6 +5,8 @@
 Named after the WWII Enigma cipher machine, the protocol brings structured cryptographic signaling to the blockchain era, honoring the codebreakers of Bletchley Park while pioneering modern steganography on a permissionless ledger.
 
 ---
+> **Why this exists:** This project is part of the DigiScope ecosystem. Before diving into the code, read [VISION.md](./VISION.md) for the philosophical framework that drives every technical decision.
+---
 
 ## 🚀 Quick Start (30 seconds)
 
